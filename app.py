@@ -183,8 +183,176 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
 # Page Renderers
 # -------------------------------------------------------------------
 
+def render_welcome_page():
+    st.title("🪂 Welcome to the SkyHigh Voyagers Project")
+    st.markdown("""
+    ### Elevate Your Cross-Country Flying
+    Welcome pilots! This platform is designed to help our paragliding community to enhance their cross country flying experience through a friendly, safe, and supporttive enviromenet promoting team and group flying.
+    """)
+
+    st.markdown("---")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("### 🎯 Our Mission")
+        st.info("""
+        Our mission is to support pilot skill progression, foster friendly competition, and build a vibrant XC community. By providing accessible task downloads, real-time tracklog validation, and fair performance scoring, we make task flying simple and fun for everyone.
+        """)
+
+        st.markdown("### 🛠️ How to Set Up & Fly a Task")
+        st.markdown("""
+        1. **Browse Tasks:** Visit the **Task Gallery** to explore task routes and waypoint coordinates.
+        2. **Download File:** Click to download the task files directly to your device or scan the QR code for quick access.
+        3. **Configure Your Instrument:** Import the downloaded task into your flight computer or navigation app (e.g., *XCTrack*, *Oudie*, or *SkyFlyHy*).
+        4. **Find flying buddies:** Coordinate with fellow pilots to fly together on the same day for maximum scoring potential.
+        5. **Fly the Route:** Take off, cross the SSS (Start Gate) pass through all sequential turnpoints, and reach Goal.
+        6. **Submit Tracklog:** Head over to **Pilot Upload**, select your task, upload your tracklog file, and record your score on the leaderboard.
+        """)
+
+    with col2:
+        st.markdown("### 📊 How the Scoring System Works")
+        st.markdown("""
+        We use a custom scoring algorithm to foster skill progression and reward pilots for both distance and speed, while also encouraging group flying.
+        All tasks are speedruns with a maxium possible score based on the task's nominal distance and difficulty.
+        You can fly any task at in anyday you wantwith your own pace.
+        To maximize your score, aim to fly with at least 4 more pilots and reach the goal as quickly as possible while staying safe and within your skill level.
+        Your results will be compared against all other pilots who flew the same task in the whole season.
+        As score will be adjusted based on how many unique pilots participated that day, please upload your tracklog even if you had a slow flight or did not reach the goal. Every flight counts toward the community and your own skill development!
+
+        So gather your friends, plan your flight, and retrive toghter!
+
+
+        Details of the scoring system are as follows:
+        Each tasks has a maximum score based on its nominal distance and difficulty (e.g., 600 points for easy tasks, 1000 points for difficult tasks).
+        The maximum score is split evenly between distance and speed components, with a multiplier applied based on the number of unique pilots flying the task on the same day.
+        In days with fewer than 5 pilots, the multiplier reduces the total score proportionally to encourage group flying and community engagement. For example, if only 3 pilots fly the task on a given day, each pilot's total score is multiplied by 0.6 (3/5). If 5 or more pilots fly the task, the multiplier is 1.0, allowing pilots to earn the full potential score.
+
+        Flights are validated automatically against official task turnpoints. Scores consist of three core components:
+
+        * **Distance Score (50% max):**
+          Earned proportionally based on how far along the task route you fly compared to total task length. So if you fly half the task distance, you earn only half of the maximum distance score.
+
+        * **Speed Score (50% max):**
+          Awarded to only pilots completing the task and reach the goal. The time will be calculated from the time you toughed start of speed section (SSS) to when you touched the end of speed section (ESS). The fastest pilot in whole seasonreceives maximum speed points ("50%" of the maximum score). Speed scores for the following pilots are calculated with a minor time-decay penalty (4 pts/min).
+
+        * **Overall Score:**
+          Socres from different tasks are combined to create an overall leaderboard. Your best score for each task is used to calculate your total score, encouraging pilots to improve their performance on tasks they have already flown.
+        """)
+
+    st.markdown("---")
+    st.success("Ready to fly? Head over to **Task Gallery** to pick your task, or **Pilot Upload** to evaluate a completed flight!")
+
+def render_task_gallery_page():
+    st.title("🗺️ Task Gallery")
+    st.markdown("Browse available cross-country tasks, preview route turnpoints, and download task files for your flight computer.")
+
+    # Fetch tasks from Supabase
+    response = supabase.table("tasks").select("*").execute()
+    tasks_data = response.data
+
+    if not tasks_data:
+        st.info("No tasks available in the gallery yet. Check back soon!")
+        return
+
+    # Select box to pick task
+    task_options = {f"Task #{t['id']} - {t['description']} (Max: {t['max_score']} pts)": t for t in tasks_data}
+    selected_label = st.selectbox("Select a Task to Preview:", options=list(task_options.keys()))
+    task = task_options[selected_label]
+
+    task_json = task.get('xctrack_json_data', {})
+    turnpoints = task_json.get('turnpoints', [])
+
+    # Pre-calculate route length
+    leg_distances = []
+    for i in range(1, len(turnpoints)):
+        lat1, lon1 = float(turnpoints[i-1]['waypoint']['lat']), float(turnpoints[i-1]['waypoint']['lon'])
+        lat2, lon2 = float(turnpoints[i]['waypoint']['lat']), float(turnpoints[i]['waypoint']['lon'])
+        leg_distances.append(haversine_distance(lat1, lon1, lat2, lon2))
+    total_dist_km = sum(leg_distances) / 1000.0 if leg_distances else 0.0
+
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        st.subheader(task['description'])
+        st.markdown(f"**Designer:** {task.get('designer', 'N/A')}")
+        st.markdown(f"**Max Task Score:** {task.get('max_score', 1000)} pts")
+        st.markdown(f"**Nominal Distance:** {round(total_dist_km, 2)} km")
+        st.markdown(f"**Turnpoints:** {len(turnpoints)}")
+
+        # Download Task File Button
+        json_str = json.dumps(task_json, indent=2)
+        st.download_button(
+            label="📥 Download Task File (.json)",
+            data=json_str,
+            file_name=f"task_{task['id']}_{task['description'].replace(' ', '_')}.json",
+            mime="application/json",
+            type="primary"
+        )
+
+        st.markdown("---")
+        st.markdown("### Turnpoint Sequence")
+        tp_list = []
+        for idx, tp in enumerate(turnpoints, 1):
+            tp_list.append({
+                "#": idx,
+                "Name": tp['waypoint'].get('name', 'N/A'),
+                "Type": tp.get('type', 'TURNPOINT'),
+                "Radius": f"{tp.get('radius', 0)} m"
+            })
+        st.dataframe(pd.DataFrame(tp_list), hide_index=True, use_container_width=True)
+
+    with col2:
+        st.subheader("Task Route Map")
+        if turnpoints:
+            start_lat = float(turnpoints[0]['waypoint']['lat'])
+            start_lon = float(turnpoints[0]['waypoint']['lon'])
+            m = folium.Map(location=[start_lat, start_lon], zoom_start=11)
+
+            route_coords = []
+            for idx, tp in enumerate(turnpoints):
+                lat = float(tp['waypoint']['lat'])
+                lon = float(tp['waypoint']['lon'])
+                radius = float(tp['radius'])
+                tp_type = tp.get('type', 'TURNPOINT')
+                name = tp['waypoint'].get('name', f'TP{idx+1}')
+
+                route_coords.append([lat, lon])
+
+                # Color coding cylinders by turnpoint type
+                color = "blue"
+                if tp_type == "TAKEOFF":
+                    color = "green"
+                elif tp_type == "SSS":
+                    color = "purple"
+                elif tp_type in ("ESS", "GOAL"):
+                    color = "red"
+
+                folium.Circle(
+                    location=[lat, lon],
+                    radius=radius,
+                    color=color,
+                    fill=True,
+                    fill_opacity=0.2,
+                    popup=f"<b>{name}</b><br>Type: {tp_type}<br>Radius: {radius}m"
+                ).add_to(m)
+
+                folium.Marker(
+                    location=[lat, lon],
+                    popup=f"{idx+1}. {name} ({tp_type})",
+                    icon=folium.Icon(color=color if color in ['red', 'blue', 'green', 'purple'] else 'blue', icon="info-sign")
+                ).add_to(m)
+
+            # Draw task path
+            if len(route_coords) > 1:
+                folium.PolyLine(route_coords, color="orange", weight=3, opacity=0.8, dash_array='5, 10').add_to(m)
+
+            st_folium(m, width=800, height=550, key=f"task_gallery_map_{task['id']}")
+        else:
+            st.warning("No geographic waypoints found for this task.")
+
 def render_pilot_page():
-    st.title("🪂 Pilot Flight Submission")
+    st.title("👨‍✈️ Pilot Flight Submission")
     st.markdown("Select a task, upload your IGC file, preview your flight, and submit your score.")
 
     # Fetch tasks from DB
@@ -258,7 +426,7 @@ def render_pilot_page():
         task_json = selected_task['xctrack_json_data']
 
         st.markdown("---")
-        st.subheader("📋 Evaluation Preview")
+        st.subheader("📑 Evaluation Preview")
         st.write(f"**Turnpoints Reached:** {validation_results['turnpoints_completed']} / {validation_results['total_turnpoints']}")
         st.write(f"**Estimated Distance Score:** {round(estimated_score, 2)}")
 
@@ -352,7 +520,7 @@ def render_pilot_page():
             del st.session_state["eval_data"]
 
 def render_admin_page():
-    st.title("🛠️ Admin Control Panel")
+    st.title("🖥️ Admin Control Panel")
 
     password = st.text_input("Enter Admin Password", type="password")
     if password != st.secrets["ADMIN_PASSWORD"]:
@@ -400,7 +568,7 @@ def render_admin_page():
 def render_leaderboard_page():
     st.title("🏆 Leadership Board")
 
-    # Fetch flights with related pilot and task details including safa_number
+    # Fetch flights with related pilot and task details
     flights_res = supabase.table("flights").select("*, pilots(name, safa_number), tasks(id, description, max_score, xctrack_json_data)").execute()
 
     if not flights_res.data:
@@ -415,7 +583,7 @@ def render_leaderboard_page():
     selected_option = st.selectbox("Select View", options=task_options)
 
     if selected_option == "Overall":
-        st.subheader("🌐 Overall Leaderboard")
+        st.subheader("📊 Overall Leaderboard")
 
         pilot_task_scores = defaultdict(dict)
         pilot_info = {}
@@ -457,7 +625,7 @@ def render_leaderboard_page():
             st.info("No overall results found.")
 
     else:
-        st.subheader(f"📊 Task Breakdown & Validation: {selected_option}")
+        st.subheader(f"📌 Task Breakdown & Validation: {selected_option}")
 
         selected_task_obj = next((t for t in tasks_data if t["description"] == selected_option), None)
         if not selected_task_obj:
@@ -539,12 +707,15 @@ def render_leaderboard_page():
 # -------------------------------------------------------------------
 # Navigation Routing
 # -------------------------------------------------------------------
-page = st.sidebar.radio("Navigation", ["Pilot Upload", "Leaderboard", "Admin"])
+page = st.sidebar.radio("Navigation", ["Welcome", "Task Gallery", "Pilot Upload", "Leaderboard", "Admin"])
 
-if page == "Pilot Upload":
+if page == "Welcome":
+    render_welcome_page()
+elif page == "Task Gallery":
+    render_task_gallery_page()
+elif page == "Pilot Upload":
     render_pilot_page()
 elif page == "Leaderboard":
     render_leaderboard_page()
 elif page == "Admin":
     render_admin_page()
-
