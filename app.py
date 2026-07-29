@@ -400,27 +400,141 @@ def render_admin_page():
 def render_leaderboard_page():
     st.title("🏆 Leadership Board")
 
-    flights_res = supabase.table("flights").select("*, pilots(name), tasks(description)").execute()
+    # Fetch flights with related pilot and task details including safa_number
+    flights_res = supabase.table("flights").select("*, pilots(name, safa_number), tasks(id, description, max_score, xctrack_json_data)").execute()
 
     if not flights_res.data:
         st.info("No flights recorded yet.")
         return
 
-    flat_data = []
-    for f in flights_res.data:
-        flat_data.append({
-            "Pilot": f["pilots"]["name"],
-            "Task": f["tasks"]["description"],
-            "Score": float(f["total_score"])
-        })
+    # Fetch all tasks for dropdown choices
+    tasks_res = supabase.table("tasks").select("*").execute()
+    tasks_data = tasks_res.data if tasks_res.data else []
 
-    df = pd.DataFrame(flat_data)
+    task_options = ["Overall"] + [t["description"] for t in tasks_data]
+    selected_option = st.selectbox("Select View", options=task_options)
 
-    leaderboard = df.pivot_table(index="Pilot", columns="Task", values="Score", aggfunc="max", fill_value=0)
-    leaderboard["Total Score"] = leaderboard.sum(axis=1)
-    leaderboard = leaderboard.sort_values(by="Total Score", ascending=False)
+    if selected_option == "Overall":
+        st.subheader("🌐 Overall Leaderboard")
 
-    st.dataframe(leaderboard.style.format("{:.1f}"), use_container_width=True)
+        pilot_task_scores = defaultdict(dict)
+        pilot_info = {}
+
+        for f in flights_res.data:
+            pilot_data = f.get("pilots", {})
+            task_data = f.get("tasks", {})
+            if not pilot_data or not task_data:
+                continue
+
+            safa = pilot_data.get("safa_number")
+            name = pilot_data.get("name")
+            task_desc = task_data.get("description")
+            score = float(f.get("total_score", 0))
+
+            pilot_info[safa] = name
+            current_max = pilot_task_scores[safa].get(task_desc, 0.0)
+            if score > current_max:
+                pilot_task_scores[safa][task_desc] = score
+
+        table_rows = []
+        all_task_names = [t["description"] for t in tasks_data]
+
+        for safa, name in pilot_info.items():
+            row = {"SAFA Number": safa, "Pilot Name": name}
+            pilot_total = 0.0
+            for t_name in all_task_names:
+                s = pilot_task_scores[safa].get(t_name, 0.0)
+                row[t_name] = s
+                pilot_total += s
+            row["Total Score"] = pilot_total
+            table_rows.append(row)
+
+        if table_rows:
+            df_overall = pd.DataFrame(table_rows)
+            df_overall = df_overall.sort_values(by="Total Score", ascending=False).reset_index(drop=True)
+            st.dataframe(df_overall.style.format({col: "{:.1f}" for col in df_overall.columns if col not in ["SAFA Number", "Pilot Name"]}), use_container_width=True)
+        else:
+            st.info("No overall results found.")
+
+    else:
+        st.subheader(f"📊 Task Breakdown & Validation: {selected_option}")
+
+        selected_task_obj = next((t for t in tasks_data if t["description"] == selected_option), None)
+        if not selected_task_obj:
+            st.warning("Selected task details not found.")
+            return
+
+        max_score = float(selected_task_obj["max_score"])
+        task_json = selected_task_obj["xctrack_json_data"]
+
+        # Calculate total task distance
+        turnpoints = task_json.get('turnpoints', [])
+        leg_distances = []
+        for i in range(1, len(turnpoints)):
+            lat1, lon1 = float(turnpoints[i-1]['waypoint']['lat']), float(turnpoints[i-1]['waypoint']['lon'])
+            lat2, lon2 = float(turnpoints[i]['waypoint']['lat']), float(turnpoints[i]['waypoint']['lon'])
+            leg_distances.append(haversine_distance(lat1, lon1, lat2, lon2))
+        total_task_distance = sum(leg_distances) if leg_distances else 1.0
+
+        # Filter flights for the chosen task
+        task_flights = [f for f in flights_res.data if f.get("tasks", {}).get("description") == selected_option]
+
+        if not task_flights:
+            st.info("No flights recorded for this task yet.")
+            return
+
+        completed_times = [f["flight_time_minutes"] for f in task_flights if f.get("flight_time_minutes") is not None]
+        fastest_time = min(completed_times) if completed_times else None
+
+        breakdown_rows = []
+        for f in task_flights:
+            pilot_data = f.get("pilots", {})
+            safa = pilot_data.get("safa_number")
+            name = pilot_data.get("name")
+
+            distance_score = float(f.get("distance_score", 0))
+            total_score = float(f.get("total_score", 0))
+            flight_time = f.get("flight_time_minutes")
+            participants = f.get("participants", 1)
+
+            day_factor = round(min(1.0, participants / 5.0), 2)
+
+            # Derive base distance score & distance covered (km)
+            base_dist = distance_score / day_factor if day_factor > 0 else distance_score
+            max_dist_score = max_score * 0.5
+            if max_dist_score > 0:
+                dist_ratio = min(1.0, base_dist / max_dist_score)
+                distance_covered_km = (dist_ratio * total_task_distance) / 1000.0
+            else:
+                distance_covered_km = 0.0
+
+            # Duration and time difference vs fastest pilot
+            if flight_time is not None and fastest_time is not None:
+                time_diff = round(flight_time - fastest_time, 2)
+                duration_str = f"{round(flight_time, 2)} mins"
+                time_diff_str = f"{'+' if time_diff > 0 else ''}{time_diff} mins"
+            else:
+                duration_str = "N/A"
+                time_diff_str = "N/A"
+
+            breakdown_rows.append({
+                "SAFA Number": safa,
+                "Pilot Name": name,
+                "Max Score of Task": max_score,
+                "Day Factor": day_factor,
+                "Distance Covered (km)": round(distance_covered_km, 2),
+                "Distance Score": round(distance_score, 2),
+                "Total Duration": duration_str,
+                "Time Diff vs Fastest": time_diff_str,
+                "Total Score": round(total_score, 2)
+            })
+
+        df_breakdown = pd.DataFrame(breakdown_rows)
+        if not df_breakdown.empty:
+            df_breakdown = df_breakdown.sort_values(by="Total Score", ascending=False).reset_index(drop=True)
+            st.dataframe(df_breakdown, use_container_width=True)
+        else:
+            st.info("No score data available for this task.")
 
 # -------------------------------------------------------------------
 # Navigation Routing
@@ -433,3 +547,4 @@ elif page == "Leaderboard":
     render_leaderboard_page()
 elif page == "Admin":
     render_admin_page()
+
