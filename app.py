@@ -6,6 +6,7 @@ import folium
 from streamlit_folium import st_folium
 from datetime import time
 from supabase import create_client, Client
+from collections import defaultdict
 
 # Set page layout
 st.set_page_config(page_title="Flight Task Evaluator", layout="wide")
@@ -75,7 +76,7 @@ def parse_igc(igc_text):
     return pd.DataFrame(records), pilot_name, date_str
 
 def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
-    """Validates IGC fixes sequentially against task turnpoints."""
+    """Validates IGC fixes sequentially against task turnpoints and calculates times/distances."""
     turnpoints = task_data.get('turnpoints', [])
     sss_info = task_data.get('sss', {})
     goal_info = task_data.get('goal', {})
@@ -97,6 +98,20 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
     validated_turnpoints = []
     was_inside_sss = False
 
+    # Tracking for scores & times
+    start_time = None
+    end_time = None
+    pilot_distance = 0.0
+
+    # Pre-calculate distances between each turnpoint leg
+    leg_distances = []
+    for i in range(1, total_tps):
+        lat1, lon1 = float(turnpoints[i-1]['waypoint']['lat']), float(turnpoints[i-1]['waypoint']['lon'])
+        lat2, lon2 = float(turnpoints[i]['waypoint']['lat']), float(turnpoints[i]['waypoint']['lon'])
+        leg_distances.append(haversine_distance(lat1, lon1, lat2, lon2))
+
+    total_task_distance = sum(leg_distances) if leg_distances else 1.0
+
     for fix in igc_fixes:
         if current_tp_idx >= total_tps: break
 
@@ -109,10 +124,11 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
         dist = haversine_distance(fix['lat'], fix['lon'], tp_lat, tp_lon)
         is_inside = dist <= radius
 
+        validated_now = False
+
         if tp_type == 'TAKEOFF':
             if is_inside:
-                validated_turnpoints.append({'tp_index': current_tp_idx, 'name': tp['waypoint']['name'], 'type': tp_type, 'achieved_at': fix['time_str']})
-                current_tp_idx += 1
+                validated_now = True
         elif tp_type == 'SSS':
             direction = sss_info.get('direction', 'EXIT')
             gate_open = (sss_gate_time is None) or (fix['time'] >= sss_gate_time)
@@ -120,23 +136,47 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
             if direction == 'EXIT':
                 if is_inside: was_inside_sss = True
                 elif was_inside_sss and gate_open:
-                    validated_turnpoints.append({'tp_index': current_tp_idx, 'name': tp['waypoint']['name'], 'type': tp_type, 'achieved_at': fix['time_str']})
-                    current_tp_idx += 1
+                    validated_now = True
+                    start_time = fix['time']
             else:
                 if is_inside and gate_open:
-                    validated_turnpoints.append({'tp_index': current_tp_idx, 'name': tp['waypoint']['name'], 'type': tp_type, 'achieved_at': fix['time_str']})
-                    current_tp_idx += 1
+                    validated_now = True
+                    start_time = fix['time']
         else:
             if goal_deadline and fix['time'] > goal_deadline: continue
             if is_inside:
-                validated_turnpoints.append({'tp_index': current_tp_idx, 'name': tp['waypoint']['name'], 'type': tp_type, 'achieved_at': fix['time_str']})
-                current_tp_idx += 1
+                validated_now = True
+                if tp_type in ('GOAL', 'ESS') or current_tp_idx == total_tps - 1:
+                    end_time = fix['time']
+
+        if validated_now:
+            validated_turnpoints.append({
+                'tp_index': current_tp_idx,
+                'name': tp['waypoint']['name'],
+                'type': tp_type,
+                'achieved_at': fix['time_str']
+            })
+            if current_tp_idx > 0 and (current_tp_idx - 1) < len(leg_distances):
+                pilot_distance += leg_distances[current_tp_idx - 1]
+            current_tp_idx += 1
+
+    # Calculate flight time in minutes between SSS and ESS/Goal
+    flight_time_mins = None
+    if start_time and end_time:
+        t1 = start_time.hour * 60 + start_time.minute + start_time.second / 60.0
+        t2 = end_time.hour * 60 + end_time.minute + end_time.second / 60.0
+        flight_time_mins = t2 - t1
+        if flight_time_mins < 0:
+            flight_time_mins += 24 * 60
 
     return {
         'task_completed': current_tp_idx == total_tps,
         'turnpoints_completed': current_tp_idx,
         'total_turnpoints': total_tps,
-        'achieved_details': validated_turnpoints
+        'achieved_details': validated_turnpoints,
+        'pilot_distance': pilot_distance,
+        'total_task_distance': total_task_distance,
+        'flight_time_mins': flight_time_mins
     }
 
 # -------------------------------------------------------------------
@@ -189,18 +229,23 @@ def render_pilot_page():
                 st.error("Invalid IGC file or no valid fixes found.")
             else:
                 validation_results = validate_task_flight(task_json, igc_df.to_dict('records'))
-                completion_ratio = validation_results['turnpoints_completed'] / max(validation_results['total_turnpoints'], 1)
-                estimated_score = float(selected_task['max_score']) * completion_ratio
+                max_score = float(selected_task['max_score'])
 
-                # Save evaluated state
+                # Calculate Base Distance Score
+                dist_ratio = validation_results['pilot_distance'] / max(validation_results['total_task_distance'], 1)
+                dist_ratio = min(dist_ratio, 1.0)
+                base_distance_score = (max_score * 0.5) * dist_ratio
+
                 st.session_state["eval_data"] = {
                     "pilot_name": pilot_name,
                     "safa_number": safa_number,
                     "glider_class": glider_class,
                     "selected_task": selected_task,
                     "igc_df": igc_df,
+                    "flight_date": flight_date,
                     "validation_results": validation_results,
-                    "estimated_score": estimated_score
+                    "base_distance_score": base_distance_score,
+                    "estimated_score": base_distance_score
                 }
 
     # 2. Render evaluation results whenever session_state has eval_data
@@ -213,9 +258,9 @@ def render_pilot_page():
         task_json = selected_task['xctrack_json_data']
 
         st.markdown("---")
-        st.subheader("🎯 Evaluation Preview")
+        st.subheader("📋 Evaluation Preview")
         st.write(f"**Turnpoints Reached:** {validation_results['turnpoints_completed']} / {validation_results['total_turnpoints']}")
-        st.write(f"**Estimated Total Score:** {round(estimated_score, 2)}")
+        st.write(f"**Estimated Distance Score:** {round(estimated_score, 2)}")
 
         if validation_results['achieved_details']:
             st.dataframe(pd.DataFrame(validation_results['achieved_details']))
@@ -249,23 +294,65 @@ def render_pilot_page():
             }
             supabase.table("pilots").upsert(pilot_data).execute()
 
-            # Insert Flight
+            flight_time = data["validation_results"].get('flight_time_mins')
+
+            # Insert current flight
             flight_data = {
                 "pilot_id": data["safa_number"],
                 "task_id": selected_task['id'],
+                "flight_date": data["flight_date"],
+                "base_distance_score": round(data["base_distance_score"], 2),
                 "speed_score": 0,
-                "distance_score": 0,
-                "total_score": round(estimated_score, 2),
+                "distance_score": round(data["base_distance_score"], 2),
+                "total_score": round(data["base_distance_score"], 2),
+                "flight_time_minutes": flight_time,
                 "participants": 1
             }
             supabase.table("flights").insert(flight_data).execute()
 
-            st.success("Flight submitted successfully!")
-            # Clear state after successful submission
+            # --- Master Recalculation Engine ---
+            flights_res = supabase.table("flights").select("*").eq("task_id", selected_task['id']).execute()
+            all_task_flights = flights_res.data
+
+            if all_task_flights:
+                completed_flights = [f for f in all_task_flights if f.get("flight_time_minutes") is not None]
+                fastest_time = min(f["flight_time_minutes"] for f in completed_flights) if completed_flights else None
+
+                max_score = float(selected_task["max_score"])
+
+                daily_pilots = defaultdict(set)
+                for f in all_task_flights:
+                    if f.get("flight_date"):
+                        daily_pilots[f["flight_date"]].add(f["pilot_id"])
+
+                for f in all_task_flights:
+                    f_date = f.get("flight_date")
+                    unique_count = len(daily_pilots[f_date]) if f_date else 1
+                    day_multiplier = min(1.0, unique_count / 5.0)
+
+                    base_dist = float(f.get("base_distance_score") or f.get("distance_score") or 0)
+                    base_speed = 0.0
+
+                    if f.get("flight_time_minutes") is not None and fastest_time is not None:
+                        p_time = f["flight_time_minutes"]
+                        base_speed = max(0, (max_score * 0.5) - 4 * (p_time - fastest_time))
+
+                    final_dist = base_dist * day_multiplier
+                    final_speed = base_speed * day_multiplier
+                    final_total = final_dist + final_speed
+
+                    supabase.table("flights").update({
+                        "speed_score": round(final_speed, 2),
+                        "distance_score": round(final_dist, 2),
+                        "total_score": round(final_total, 2),
+                        "participants": unique_count
+                    }).eq("id", f["id"]).execute()
+
+            st.success(f"Flight submitted! Scores for Task {selected_task['id']} updated based on global speed and daily team sizes.")
             del st.session_state["eval_data"]
 
 def render_admin_page():
-    st.title("🔒 Admin Control Panel")
+    st.title("🛠️ Admin Control Panel")
 
     password = st.text_input("Enter Admin Password", type="password")
     if password != st.secrets["ADMIN_PASSWORD"]:
@@ -305,7 +392,6 @@ def render_admin_page():
             df = pd.DataFrame(response.data)
             st.dataframe(df)
 
-            # Simple delete mechanism
             del_id = st.number_input("Task ID to Delete", min_value=1, step=1)
             if st.button("Delete Task", type="primary"):
                 supabase.table("tasks").delete().eq("id", del_id).execute()
@@ -314,14 +400,12 @@ def render_admin_page():
 def render_leaderboard_page():
     st.title("🏆 Leadership Board")
 
-    # Fetch Data
     flights_res = supabase.table("flights").select("*, pilots(name), tasks(description)").execute()
 
     if not flights_res.data:
         st.info("No flights recorded yet.")
         return
 
-    # Flatten JSON response
     flat_data = []
     for f in flights_res.data:
         flat_data.append({
@@ -332,13 +416,8 @@ def render_leaderboard_page():
 
     df = pd.DataFrame(flat_data)
 
-    # Pivot Table: Pilots as rows, Tasks as columns, sum of scores
-    leaderboard = df.pivot_table(index="Pilot", columns="Task", values="Score", aggfunc="sum", fill_value=0)
-
-    # Add Total Column
+    leaderboard = df.pivot_table(index="Pilot", columns="Task", values="Score", aggfunc="max", fill_value=0)
     leaderboard["Total Score"] = leaderboard.sum(axis=1)
-
-    # Sort by highest score
     leaderboard = leaderboard.sort_values(by="Total Score", ascending=False)
 
     st.dataframe(leaderboard.style.format("{:.1f}"), use_container_width=True)
