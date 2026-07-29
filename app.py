@@ -1,33 +1,38 @@
 import json
 import math
-import re
 import pandas as pd
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
+from datetime import time
+from supabase import create_client, Client
 
 # Set page layout
 st.set_page_config(page_title="Flight Task Evaluator", layout="wide")
 
+# --- Database Connection ---
+@st.cache_resource
+def init_connection() -> Client:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_connection()
 
 # -------------------------------------------------------------------
 # Helper Functions: Geodesic Calculations & Parsers
 # -------------------------------------------------------------------
-def haversine_distance(lat1, lon1, lat2, lon2):
-    """Calculates great-circle distance between two points on Earth in meters."""
-    R = 6371000.0  # Earth radius in meters
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculates the great-circle distance between two points in meters."""
+    R = 6371000.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
     delta_phi = math.radians(lat2 - lat1)
     delta_lambda = math.radians(lon2 - lon1)
 
-    a = (
-        math.sin(delta_phi / 2.0) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
-    )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
+    a = (math.sin(delta_phi / 2.0) ** 2 +
+         math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2)
 
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
 
 def parse_igc(igc_text):
     """Parses IGC file B-records into a Pandas DataFrame."""
@@ -36,201 +41,316 @@ def parse_igc(igc_text):
     date_str = "Unknown"
 
     for line in igc_text.splitlines():
-        # Extract metadata
         if line.startswith("HFPLTPILOT:"):
             pilot_name = line.split(":", 1)[1].strip()
         elif line.startswith("HFDTE"):
             date_str = line[5:11]
 
-        # Extract B-records (Fix points)
-        # Format: B hhmmss DDMMmmm N/S DDDMMmmm E/W A/V pppppp gggggg
         if line.startswith("B") and len(line) >= 35:
             try:
                 time_str = f"{line[1:3]}:{line[3:5]}:{line[5:7]}"
 
-                # Latitude: DDMMmmm S/N
+                # Parse Time object for validation logic
+                h, m, s = map(int, [line[1:3], line[3:5], line[5:7]])
+                parsed_time = time(h, m, s)
+
                 lat_deg = int(line[7:9])
                 lat_min = float(f"{line[9:11]}.{line[11:14]}")
                 lat = lat_deg + (lat_min / 60.0)
-                if line[14] == "S":
-                    lat = -lat
+                if line[14] == "S": lat = -lat
 
-                # Longitude: DDDMMmmm E/W
                 lon_deg = int(line[15:18])
                 lon_min = float(f"{line[18:20]}.{line[20:23]}")
                 lon = lon_deg + (lon_min / 60.0)
-                if line[23] == "W":
-                    lon = -lon
+                if line[23] == "W": lon = -lon
 
-                # Altitudes
-                press_alt = int(line[25:30])
-                gps_alt = int(line[30:35])
-
-                records.append(
-                    {
-                        "time": time_str,
-                        "lat": lat,
-                        "lon": lon,
-                        "press_alt": press_alt,
-                        "gps_alt": gps_alt,
-                    }
-                )
+                records.append({
+                    "time_str": time_str,
+                    "time": parsed_time,
+                    "lat": lat,
+                    "lon": lon,
+                })
             except Exception:
                 continue
+    return pd.DataFrame(records), pilot_name, date_str
 
-    df = pd.DataFrame(records)
-    return df, pilot_name, date_str
+def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
+    """Validates IGC fixes sequentially against task turnpoints."""
+    turnpoints = task_data.get('turnpoints', [])
+    sss_info = task_data.get('sss', {})
+    goal_info = task_data.get('goal', {})
 
+    sss_gate_time = None
+    if sss_info.get('timeGates'):
+        gate_str = sss_info['timeGates'][0].replace('Z', '')
+        h, m, s = map(int, gate_str.split(':'))
+        sss_gate_time = time(h, m, s)
 
-def parse_task(task_json):
-    """Extracts turnpoint details from the Task JSON structure."""
-    turnpoints = []
-    for index, tp in enumerate(task_json.get("turnpoints", [])):
-        wp = tp.get("waypoint", {})
-        radius = float(tp.get("radius", 0))
-        tp_type = tp.get("type", "TURNPOINT")
+    goal_deadline = None
+    if goal_info.get('deadline'):
+        dl_str = goal_info['deadline'].replace('Z', '')
+        h, m, s = map(int, dl_str.split(':'))
+        goal_deadline = time(h, m, s)
 
-        turnpoints.append(
-            {
-                "index": index + 1,
-                "name": wp.get("name", f"TP{index+1}"),
-                "description": wp.get("description", ""),
-                "lat": float(wp.get("lat", 0.0)),
-                "lon": float(wp.get("lon", 0.0)),
-                "radius": radius,
-                "type": tp_type,
-            }
-        )
-    return turnpoints
+    current_tp_idx = 0
+    total_tps = len(turnpoints)
+    validated_turnpoints = []
+    was_inside_sss = False
 
+    for fix in igc_fixes:
+        if current_tp_idx >= total_tps: break
 
-def evaluate_task(igc_df, turnpoints):
-    """Evaluates min distance and validation for each turnpoint."""
-    results = []
+        tp = turnpoints[current_tp_idx]
+        tp_type = tp.get('type', 'TURNPOINT')
+        radius = float(tp['radius'])
+        tp_lat = float(tp['waypoint']['lat'])
+        tp_lon = float(tp['waypoint']['lon'])
 
-    for tp in turnpoints:
-        min_dist = float("inf")
-        achieved_time = None
-        reached = False
+        dist = haversine_distance(fix['lat'], fix['lon'], tp_lat, tp_lon)
+        is_inside = dist <= radius
 
-        for _, row in igc_df.iterrows():
-            dist = haversine_distance(row["lat"], row["lon"], tp["lat"], tp["lon"])
-            if dist < min_dist:
-                min_dist = dist
-                if dist <= tp["radius"] and not reached:
-                    reached = True
-                    achieved_time = row["time"]
+        if tp_type == 'TAKEOFF':
+            if is_inside:
+                validated_turnpoints.append({'tp_index': current_tp_idx, 'name': tp['waypoint']['name'], 'type': tp_type, 'achieved_at': fix['time_str']})
+                current_tp_idx += 1
+        elif tp_type == 'SSS':
+            direction = sss_info.get('direction', 'EXIT')
+            gate_open = (sss_gate_time is None) or (fix['time'] >= sss_gate_time)
 
-        results.append(
-            {
-                "TP #": tp["index"],
-                "Name": tp["name"],
-                "Type": tp["type"],
-                "Radius (m)": int(tp["radius"]),
-                "Min Dist (m)": round(min_dist, 1),
-                "Status": "✅ Reached" if reached else "❌ Missed",
-                "Achieved Time": achieved_time if achieved_time else "N/A",
-            }
-        )
+            if direction == 'EXIT':
+                if is_inside: was_inside_sss = True
+                elif was_inside_sss and gate_open:
+                    validated_turnpoints.append({'tp_index': current_tp_idx, 'name': tp['waypoint']['name'], 'type': tp_type, 'achieved_at': fix['time_str']})
+                    current_tp_idx += 1
+            else:
+                if is_inside and gate_open:
+                    validated_turnpoints.append({'tp_index': current_tp_idx, 'name': tp['waypoint']['name'], 'type': tp_type, 'achieved_at': fix['time_str']})
+                    current_tp_idx += 1
+        else:
+            if goal_deadline and fix['time'] > goal_deadline: continue
+            if is_inside:
+                validated_turnpoints.append({'tp_index': current_tp_idx, 'name': tp['waypoint']['name'], 'type': tp_type, 'achieved_at': fix['time_str']})
+                current_tp_idx += 1
 
-    return pd.DataFrame(results)
-
+    return {
+        'task_completed': current_tp_idx == total_tps,
+        'turnpoints_completed': current_tp_idx,
+        'total_turnpoints': total_tps,
+        'achieved_details': validated_turnpoints
+    }
 
 # -------------------------------------------------------------------
-# Streamlit Web Interface
+# Page Renderers
 # -------------------------------------------------------------------
-st.title("🪂 Flight Task & Tracklog Evaluator")
-st.markdown(
-    "Upload your **Task JSON** and **IGC Tracklog** file to validate turnpoint achievements and view the flight path."
-)
 
-col1, col2 = st.columns(2)
+def render_pilot_page():
+    st.title("🪂 Pilot Flight Submission")
+    st.markdown("Select a task, upload your IGC file, preview your flight, and submit your score.")
 
-with col1:
-    task_file = st.file_uploader("Upload Task File (.json)", type=["json"])
+    # Fetch tasks from DB
+    response = supabase.table("tasks").select("*").execute()
+    tasks_data = response.data
 
-with col2:
-    igc_file = st.file_uploader("Upload Tracklog File (.igc)", type=["igc"])
+    if not tasks_data:
+        st.warning("No tasks available. An admin needs to create tasks first.")
+        return
 
-if task_file and igc_file:
-    # 1. Parse Task File
-    task_data = json.load(task_file)
-    turnpoints = parse_task(task_data)
+    # Pilot inputs form
+    with st.form("pilot_inputs_form"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            pilot_name = st.text_input("Pilot Name")
+        with col2:
+            safa_number = st.number_input("SAFA Number (ID)", min_value=1, step=1)
+        with col3:
+            glider_class = st.selectbox("Glider Class", options=['A', 'B', 'C', 'D', 'CCC'])
 
-    # 2. Parse IGC File
-    igc_content = igc_file.read().decode("utf-8", errors="ignore")
-    igc_df, pilot_name, flight_date = parse_igc(igc_content)
+        # Task Selection
+        task_options = {f"{t['description']} (Max Score: {t['max_score']})": t for t in tasks_data}
+        selected_task_label = st.selectbox("Select Task", options=list(task_options.keys()))
+        selected_task = task_options[selected_task_label]
 
-    if igc_df.empty:
-        st.error(
-            "Could not parse valid B-records from the provided IGC file. Please check the file format."
-        )
-    else:
-        # Display Pilot Info
-        st.subheader("📋 Flight Metadata")
-        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-        m_col1.metric("Pilot", pilot_name)
-        m_col2.metric("Date", flight_date)
-        m_col3.metric("Track Points", len(igc_df))
-        m_col4.metric("Max Altitude (GPS)", f"{igc_df['gps_alt'].max()} m")
+        igc_file = st.file_uploader("Upload Tracklog File (.igc)", type=["igc"])
+
+        preview_button = st.form_submit_button("Preview & Evaluate")
+
+    # 1. When Preview button is pressed, parse and save results into session_state
+    if preview_button:
+        if not pilot_name:
+            st.error("Please enter your name.")
+        elif not igc_file:
+            st.error("Please upload an IGC file.")
+        else:
+            task_json = selected_task['xctrack_json_data']
+            igc_content = igc_file.read().decode("utf-8", errors="ignore")
+            igc_df, parsed_name, flight_date = parse_igc(igc_content)
+
+            if igc_df.empty:
+                st.error("Invalid IGC file or no valid fixes found.")
+            else:
+                validation_results = validate_task_flight(task_json, igc_df.to_dict('records'))
+                completion_ratio = validation_results['turnpoints_completed'] / max(validation_results['total_turnpoints'], 1)
+                estimated_score = float(selected_task['max_score']) * completion_ratio
+
+                # Save evaluated state
+                st.session_state["eval_data"] = {
+                    "pilot_name": pilot_name,
+                    "safa_number": safa_number,
+                    "glider_class": glider_class,
+                    "selected_task": selected_task,
+                    "igc_df": igc_df,
+                    "validation_results": validation_results,
+                    "estimated_score": estimated_score
+                }
+
+    # 2. Render evaluation results whenever session_state has eval_data
+    if "eval_data" in st.session_state:
+        data = st.session_state["eval_data"]
+        validation_results = data["validation_results"]
+        estimated_score = data["estimated_score"]
+        selected_task = data["selected_task"]
+        igc_df = data["igc_df"]
+        task_json = selected_task['xctrack_json_data']
 
         st.markdown("---")
+        st.subheader("🎯 Evaluation Preview")
+        st.write(f"**Turnpoints Reached:** {validation_results['turnpoints_completed']} / {validation_results['total_turnpoints']}")
+        st.write(f"**Estimated Total Score:** {round(estimated_score, 2)}")
 
-        # 3. Evaluate Turnpoints
-        st.subheader("🎯 Turnpoint Verification Summary")
-        eval_df = evaluate_task(igc_df, turnpoints)
-        st.dataframe(eval_df, use_container_width=True)
+        if validation_results['achieved_details']:
+            st.dataframe(pd.DataFrame(validation_results['achieved_details']))
 
-        st.markdown("---")
+        # Render Map
+        turnpoints = task_json.get('turnpoints', [])
+        if turnpoints and not igc_df.empty:
+            start_lat = float(turnpoints[0]['waypoint']['lat'])
+            start_lon = float(turnpoints[0]['waypoint']['lon'])
+            m = folium.Map(location=[start_lat, start_lon], zoom_start=11)
 
-        # 4. Map Display
-        st.subheader("🗺️ Flight Track & Task Map")
+            for tp in turnpoints:
+                folium.Circle(
+                    location=[float(tp['waypoint']['lat']), float(tp['waypoint']['lon'])],
+                    radius=float(tp['radius']),
+                    color="blue", fill=True
+                ).add_to(m)
 
-        # Center map on the first turnpoint
-        start_lat = turnpoints[0]["lat"] if turnpoints else igc_df["lat"].iloc[0]
-        start_lon = turnpoints[0]["lon"] if turnpoints else igc_df["lon"].iloc[0]
+            track_coords = igc_df[["lat", "lon"]].values.tolist()
+            folium.PolyLine(track_coords, color="orange", weight=3, opacity=0.8).add_to(m)
 
-        m = folium.Map(location=[start_lat, start_lon], zoom_start=11)
+            st_folium(m, width=1200, height=500, key="preview_flight_map")
 
-        # Plot Turnpoint Cylinders and Markers
-        for tp in turnpoints:
-            color = (
-                "green"
-                if tp["type"] == "TAKEOFF"
-                else (
-                    "red"
-                    if tp["type"] == "ESS"
-                    else "blue" if tp["type"] == "SSS" else "purple"
-                )
-            )
+        # 3. Submit Flight to Supabase
+        if st.button("Submit Flight to Database", type="primary"):
+            # Upsert Pilot
+            pilot_data = {
+                "safa_number": data["safa_number"],
+                "name": data["pilot_name"],
+                "glider_class": data["glider_class"]
+            }
+            supabase.table("pilots").upsert(pilot_data).execute()
 
-            # Turnpoint Center Marker
-            folium.Marker(
-                location=[tp["lat"], tp["lon"]],
-                popup=f"{tp['name']} ({tp['type']})<br>Radius: {tp['radius']}m",
-                tooltip=f"TP{tp['index']}: {tp['name']}",
-                icon=folium.Icon(color=color, icon="flag"),
-            ).add_to(m)
+            # Insert Flight
+            flight_data = {
+                "pilot_id": data["safa_number"],
+                "task_id": selected_task['id'],
+                "speed_score": 0,
+                "distance_score": 0,
+                "total_score": round(estimated_score, 2),
+                "participants": 1
+            }
+            supabase.table("flights").insert(flight_data).execute()
 
-            # Turnpoint Cylinder Boundary Circle
-            folium.Circle(
-                location=[tp["lat"], tp["lon"]],
-                radius=tp["radius"],
-                color=color,
-                fill=True,
-                fill_opacity=0.15,
-            ).add_to(m)
+            st.success("Flight submitted successfully!")
+            # Clear state after successful submission
+            del st.session_state["eval_data"]
 
-        # Plot IGC Flight Path
-        track_coords = igc_df[["lat", "lon"]].values.tolist()
-        folium.PolyLine(
-            track_coords, color="orange", weight=3, opacity=0.8, tooltip="Flight Track"
-        ).add_to(m)
+def render_admin_page():
+    st.title("🔒 Admin Control Panel")
 
-        # Render Map in Streamlit
-        st_folium(m, width=1200, height=600)
+    password = st.text_input("Enter Admin Password", type="password")
+    if password != st.secrets["ADMIN_PASSWORD"]:
+        if password: st.error("Incorrect password.")
+        return
 
-else:
-    st.info(
-        "Please upload both a Task JSON file and an IGC tracklog file to begin evaluation."
-    )
+    st.success("Authenticated.")
+
+    tab1, tab2 = st.tabs(["Add Task", "Manage Tasks"])
+
+    with tab1:
+        st.subheader("Add New Task")
+        with st.form("add_task_form"):
+            desc = st.text_input("Description")
+            designer = st.text_input("Designer")
+            max_score = st.number_input("Max Score", min_value=0, max_value=1000)
+            task_file = st.file_uploader("Task JSON File", type=["json"])
+
+            if st.form_submit_button("Save Task"):
+                if task_file and desc:
+                    task_json = json.load(task_file)
+                    task_data = {
+                        "description": desc,
+                        "designer": designer,
+                        "max_score": max_score,
+                        "xctrack_json_data": task_json
+                    }
+                    supabase.table("tasks").insert(task_data).execute()
+                    st.success("Task added!")
+                else:
+                    st.error("Please provide both a description and a JSON file.")
+
+    with tab2:
+        st.subheader("Existing Tasks")
+        response = supabase.table("tasks").select("id, description, designer, max_score").execute()
+        if response.data:
+            df = pd.DataFrame(response.data)
+            st.dataframe(df)
+
+            # Simple delete mechanism
+            del_id = st.number_input("Task ID to Delete", min_value=1, step=1)
+            if st.button("Delete Task", type="primary"):
+                supabase.table("tasks").delete().eq("id", del_id).execute()
+                st.success("Task deleted. Refresh to update table.")
+
+def render_leaderboard_page():
+    st.title("🏆 Leadership Board")
+
+    # Fetch Data
+    flights_res = supabase.table("flights").select("*, pilots(name), tasks(description)").execute()
+
+    if not flights_res.data:
+        st.info("No flights recorded yet.")
+        return
+
+    # Flatten JSON response
+    flat_data = []
+    for f in flights_res.data:
+        flat_data.append({
+            "Pilot": f["pilots"]["name"],
+            "Task": f["tasks"]["description"],
+            "Score": float(f["total_score"])
+        })
+
+    df = pd.DataFrame(flat_data)
+
+    # Pivot Table: Pilots as rows, Tasks as columns, sum of scores
+    leaderboard = df.pivot_table(index="Pilot", columns="Task", values="Score", aggfunc="sum", fill_value=0)
+
+    # Add Total Column
+    leaderboard["Total Score"] = leaderboard.sum(axis=1)
+
+    # Sort by highest score
+    leaderboard = leaderboard.sort_values(by="Total Score", ascending=False)
+
+    st.dataframe(leaderboard.style.format("{:.1f}"), use_container_width=True)
+
+# -------------------------------------------------------------------
+# Navigation Routing
+# -------------------------------------------------------------------
+page = st.sidebar.radio("Navigation", ["Pilot Upload", "Leaderboard", "Admin"])
+
+if page == "Pilot Upload":
+    render_pilot_page()
+elif page == "Leaderboard":
+    render_leaderboard_page()
+elif page == "Admin":
+    render_admin_page()
