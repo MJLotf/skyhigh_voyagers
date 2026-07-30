@@ -29,7 +29,6 @@ MarkupSafe==3.0.3
 multidict==6.7.1
 narwhals==2.24.0
 numpy==2.5.1
-packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1777103621/work
 pandas==3.0.5
 pillow==12.3.0
 postgrest==2.31.0
