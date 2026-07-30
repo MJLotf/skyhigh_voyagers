@@ -3,6 +3,7 @@ import math
 import pandas as pd
 import streamlit as st
 import folium
+import requests
 from streamlit_folium import st_folium
 from datetime import time
 from supabase import create_client, Client
@@ -34,34 +35,6 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
          math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2)
 
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
-
-def get_edge_points(lat1: float, lon1: float, r1: float, lat2: float, lon2: float, r2: float):
-    """Calculates the shortest path coordinates from the edge of cylinder 1 to cylinder 2."""
-    lat_to_m = 111320.0
-    lon_to_m = 111320.0 * math.cos(math.radians((lat1 + lat2) / 2.0))
-
-    # Convert lat/lon to approximate local meters
-    y1, x1 = lat1 * lat_to_m, lon1 * lon_to_m
-    y2, x2 = lat2 * lat_to_m, lon2 * lon_to_m
-
-    dx = x2 - x1
-    dy = y2 - y1
-    dist = math.hypot(dx, dy)
-
-    # If cylinders overlap, fallback to centers to avoid mathematical errors
-    if dist <= r1 + r2:
-        return (lat1, lon1), (lat2, lon2)
-
-    ux, uy = dx / dist, dy / dist
-
-    # Edge coordinates in meters
-    ex1 = x1 + ux * r1
-    ey1 = y1 + uy * r1
-    ex2 = x2 - ux * r2
-    ey2 = y2 - uy * r2
-
-    # Convert back to lat/lon
-    return (ey1 / lat_to_m, ex1 / lon_to_m), (ey2 / lat_to_m, ex2 / lon_to_m)
 
 def parse_igc(igc_text):
     """Parses IGC file B-records into a Pandas DataFrame."""
@@ -207,6 +180,17 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
         'flight_time_mins': flight_time_mins
     }
 
+def fetch_task_from_api(task_hash: str):
+    """Fetches the JSON task data from XContest API."""
+    url = f"https://tools.xcontest.org/api/xctsk/load/{task_hash}"
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+    except Exception as e:
+        st.error(f"Failed to fetch task {task_hash}: {e}")
+    return None
+
 # -------------------------------------------------------------------
 # Page Renderers
 # -------------------------------------------------------------------
@@ -270,6 +254,7 @@ def render_welcome_page():
     st.markdown("---")
     st.success("Ready to fly? Head over to **Task Gallery** to pick your task, or **Pilot Upload** to evaluate a completed flight!")
 
+
 def render_task_gallery_page():
     st.title("🗺️ Task Gallery")
     st.markdown("Browse available cross-country tasks, preview route turnpoints, and download task files for your flight computer.")
@@ -282,21 +267,18 @@ def render_task_gallery_page():
         st.info("No tasks available in the gallery yet. Check back soon!")
         return
 
-    # Select box to pick task (Cleaned up titles)
+    # Select box to pick task
     task_options = {f"{t['description']} (Max: {t['max_score']} pts)": t for t in tasks_data}
     selected_label = st.selectbox("Select a Task to Preview:", options=list(task_options.keys()))
     task = task_options[selected_label]
+    task_hash = task.get("task_hash")
 
-    task_json = task.get('xctrack_json_data', {})
-    turnpoints = task_json.get('turnpoints', [])
+    if not task_hash:
+        st.error("Invalid task configuration. Missing task hash.")
+        return
 
-    # Pre-calculate route length
-    leg_distances = []
-    for i in range(1, len(turnpoints)):
-        lat1, lon1 = float(turnpoints[i-1]['waypoint']['lat']), float(turnpoints[i-1]['waypoint']['lon'])
-        lat2, lon2 = float(turnpoints[i]['waypoint']['lat']), float(turnpoints[i]['waypoint']['lon'])
-        leg_distances.append(haversine_distance(lat1, lon1, lat2, lon2))
-    total_dist_km = sum(leg_distances) / 1000.0 if leg_distances else 0.0
+    # Fetch the actual task definition to enable downloading and passing to QR generator
+    task_json = fetch_task_from_api(task_hash)
 
     col1, col2 = st.columns([1, 2])
 
@@ -304,88 +286,43 @@ def render_task_gallery_page():
         st.subheader(task['description'])
         st.markdown(f"**Designer:** {task.get('designer', 'N/A')}")
         st.markdown(f"**Max Task Score:** {task.get('max_score', 1000)} pts")
-        st.markdown(f"**Nominal Distance:** {round(total_dist_km, 2)} km")
-        st.markdown(f"**Turnpoints:** {len(turnpoints)}")
+        st.markdown(f"**Task Hash:** `{task_hash}`")
 
-        # Download Task File Button (.xctsk extension)
-        json_str = json.dumps(task_json, indent=2)
-        st.download_button(
-            label="📥 Download Task File (.xctsk)",
-            data=json_str,
-            file_name=f"task_{task['description'].replace(' ', '_')}.xctsk",
-            mime="application/json",
-            type="primary"
-        )
+        # Link directly to the XContest viewer tool
+        xcontest_url = f"https://tools.xcontest.org/xctsk/load?taskCode={task_hash}"
+        st.markdown(f"[🌍 View Full Task & Turnpoints on XContest]({xcontest_url})")
 
         st.markdown("---")
-        st.markdown("### Turnpoint Sequence")
-        tp_list = []
-        for idx, tp in enumerate(turnpoints, 1):
-            tp_list.append({
-                "#": idx,
-                "Name": tp['waypoint'].get('name', 'N/A'),
-                "Type": tp.get('type', 'TURNPOINT'),
-                "Radius": f"{tp.get('radius', 0)} m"
-            })
-        st.dataframe(pd.DataFrame(tp_list), hide_index=True, use_container_width=True)
+
+        if task_json:
+            st.download_button(
+                label="📥 Download Task File (.xctsk)",
+                data=json.dumps(task_json, indent=2),
+                file_name=f"task_{task['description'].replace(' ', '_')}.xctsk",
+                mime="application/xctsk",
+                type="primary"
+            )
+
+            st.markdown("### Scan to Load Task")
+            # Fetch QR Code via API
+            qr_response = requests.post(
+                "https://tools.xcontest.org/api/xctsk/qr",
+                json=task_json,
+                headers={"Content-Type": "application/json"}
+            )
+
+            if qr_response.status_code == 200:
+                # API returns SVG, which Streamlit handles best via HTML block
+                st.markdown(f"<div>{qr_response.text}</div>", unsafe_allow_html=True)
+            else:
+                st.warning("Could not generate QR code at this time.")
 
     with col2:
         st.subheader("Task Route Map")
-        if turnpoints:
-            start_lat = float(turnpoints[0]['waypoint']['lat'])
-            start_lon = float(turnpoints[0]['waypoint']['lon'])
-            m = folium.Map(location=[start_lat, start_lon], zoom_start=11)
+        # Display the static JPEG map from the API endpoint
+        img_url = f"https://tools.xcontest.org/api/xctsk/image/{task_hash}"
+        st.image(img_url, caption=f"Map for {task['description']}", width="stretch")
 
-            # Draw Turnpoint Cylinders
-            for idx, tp in enumerate(turnpoints):
-                lat = float(tp['waypoint']['lat'])
-                lon = float(tp['waypoint']['lon'])
-                radius = float(tp['radius'])
-                tp_type = tp.get('type', 'TURNPOINT')
-                name = tp['waypoint'].get('name', f'TP{idx+1}')
-
-                color = "blue"
-                if tp_type == "TAKEOFF":
-                    color = "green"
-                elif tp_type == "SSS":
-                    color = "purple"
-                elif tp_type in ("ESS", "GOAL"):
-                    color = "red"
-
-                folium.Circle(
-                    location=[lat, lon],
-                    radius=radius,
-                    color=color,
-                    fill=True,
-                    fill_opacity=0.2,
-                    popup=f"<b>{name}</b><br>Type: {tp_type}<br>Radius: {radius}m"
-                ).add_to(m)
-
-                folium.Marker(
-                    location=[lat, lon],
-                    popup=f"{idx+1}. {name} ({tp_type})",
-                    icon=folium.Icon(color=color if color in ['red', 'blue', 'green', 'purple'] else 'blue', icon="info-sign")
-                ).add_to(m)
-
-            # Draw Task Path (Edge to Edge / Minimum Distance)
-            for i in range(len(turnpoints) - 1):
-                tp1 = turnpoints[i]
-                tp2 = turnpoints[i+1]
-                lat1, lon1 = float(tp1['waypoint']['lat']), float(tp1['waypoint']['lon'])
-                lat2, lon2 = float(tp2['waypoint']['lat']), float(tp2['waypoint']['lon'])
-                r1, r2 = float(tp1['radius']), float(tp2['radius'])
-
-                # Calculate closest edges between the two turnpoints
-                (e_lat1, e_lon1), (e_lat2, e_lon2) = get_edge_points(lat1, lon1, r1, lat2, lon2, r2)
-
-                folium.PolyLine(
-                    [(e_lat1, e_lon1), (e_lat2, e_lon2)],
-                    color="orange", weight=3, opacity=0.8, dash_array='5, 10'
-                ).add_to(m)
-
-            st_folium(m, width=800, height=550, key=f"task_gallery_map_{task['id']}")
-        else:
-            st.warning("No geographic waypoints found for this task.")
 
 def render_pilot_page():
     st.title("👨‍✈️ Pilot Flight Submission")
@@ -418,7 +355,6 @@ def render_pilot_page():
 
         preview_button = st.form_submit_button("Preview & Evaluate")
 
-    # 1. When Preview button is pressed, parse and save results into session_state
     if preview_button:
         if not pilot_name:
             st.error("Please enter your name.")
@@ -427,41 +363,46 @@ def render_pilot_page():
         elif igc_file.size > 2 * 1024 * 1024:
             st.error("File size exceeds the 2 MB limit.")
         else:
-            task_json = selected_task['xctrack_json_data']
-            igc_content = igc_file.read().decode("utf-8", errors="ignore")
-            igc_df, parsed_name, flight_date = parse_igc(igc_content)
+            task_hash = selected_task.get("task_hash")
+            task_json = fetch_task_from_api(task_hash)
 
-            if igc_df.empty:
-                st.error("Invalid IGC file or no valid fixes found.")
+            if not task_json:
+                st.error("Could not retrieve task parameters from XContest API. Validation cannot proceed.")
             else:
-                validation_results = validate_task_flight(task_json, igc_df.to_dict('records'))
-                max_score = float(selected_task['max_score'])
+                igc_content = igc_file.read().decode("utf-8", errors="ignore")
+                igc_df, parsed_name, flight_date = parse_igc(igc_content)
 
-                # Calculate Base Distance Score
-                dist_ratio = validation_results['pilot_distance'] / max(validation_results['total_task_distance'], 1)
-                dist_ratio = min(dist_ratio, 1.0)
-                base_distance_score = (max_score * 0.5) * dist_ratio
+                if igc_df.empty:
+                    st.error("Invalid IGC file or no valid fixes found.")
+                else:
+                    validation_results = validate_task_flight(task_json, igc_df.to_dict('records'))
+                    max_score = float(selected_task['max_score'])
 
-                st.session_state["eval_data"] = {
-                    "pilot_name": pilot_name,
-                    "safa_number": safa_number,
-                    "glider_class": glider_class,
-                    "selected_task": selected_task,
-                    "igc_df": igc_df,
-                    "flight_date": flight_date,
-                    "validation_results": validation_results,
-                    "base_distance_score": base_distance_score,
-                    "estimated_score": base_distance_score
-                }
+                    # Calculate Base Distance Score
+                    dist_ratio = validation_results['pilot_distance'] / max(validation_results['total_task_distance'], 1)
+                    dist_ratio = min(dist_ratio, 1.0)
+                    base_distance_score = (max_score * 0.5) * dist_ratio
 
-    # 2. Render evaluation results whenever session_state has eval_data
+                    st.session_state["eval_data"] = {
+                        "pilot_name": pilot_name,
+                        "safa_number": safa_number,
+                        "glider_class": glider_class,
+                        "selected_task": selected_task,
+                        "task_json": task_json,  # Stored here to avoid re-fetching on render
+                        "igc_df": igc_df,
+                        "flight_date": flight_date,
+                        "validation_results": validation_results,
+                        "base_distance_score": base_distance_score,
+                        "estimated_score": base_distance_score
+                    }
+
     if "eval_data" in st.session_state:
         data = st.session_state["eval_data"]
         validation_results = data["validation_results"]
         estimated_score = data["estimated_score"]
         selected_task = data["selected_task"]
         igc_df = data["igc_df"]
-        task_json = selected_task['xctrack_json_data']
+        task_json = data["task_json"]
 
         st.markdown("---")
         st.subheader("📑 Evaluation Preview")
@@ -471,7 +412,7 @@ def render_pilot_page():
         if validation_results['achieved_details']:
             st.dataframe(pd.DataFrame(validation_results['achieved_details']))
 
-        # Render Map
+        # Render Map internally for track comparison
         turnpoints = task_json.get('turnpoints', [])
         if turnpoints and not igc_df.empty:
             start_lat = float(turnpoints[0]['waypoint']['lat'])
@@ -490,7 +431,6 @@ def render_pilot_page():
 
             st_folium(m, width=1200, height=500, key="preview_flight_map")
 
-        # 3. Submit Flight to Supabase
         if st.button("Submit Flight to Database", type="primary"):
             # Upsert Pilot
             pilot_data = {
@@ -516,7 +456,7 @@ def render_pilot_page():
             }
             supabase.table("flights").insert(flight_data).execute()
 
-            # --- Master Recalculation Engine ---
+            # Master Recalculation Engine
             flights_res = supabase.table("flights").select("*").eq("task_id", selected_task['id']).execute()
             all_task_flights = flights_res.data
 
@@ -561,7 +501,7 @@ def render_admin_page():
     st.title("🖥️ Admin Control Panel")
 
     password = st.text_input("Enter Admin Password", type="password")
-    if password != st.secrets["ADMIN_PASSWORD"]:
+    if password != st.secrets.get("ADMIN_PASSWORD", ""):
         if password: st.error("Incorrect password.")
         return
 
@@ -575,27 +515,29 @@ def render_admin_page():
             desc = st.text_input("Description")
             designer = st.text_input("Designer")
             max_score = st.number_input("Max Score", min_value=0, max_value=1000)
-            task_file = st.file_uploader("Task File (.json or .xctsk)", type=["json", "xctsk"])
+            task_hash = st.text_input("Task Hash (e.g., c3262b39a20f1215)")
 
             if st.form_submit_button("Save Task"):
-                if not task_file or not desc:
-                    st.error("Please provide both a description and a task file.")
-                elif task_file.size > 2 * 1024 * 1024:
-                    st.error("File size exceeds the 2 MB limit.")
+                if not task_hash or not desc:
+                    st.error("Please provide both a description and a task hash.")
                 else:
-                    task_json = json.load(task_file)
-                    task_data = {
-                        "description": desc,
-                        "designer": designer,
-                        "max_score": max_score,
-                        "xctrack_json_data": task_json
-                    }
-                    supabase.table("tasks").insert(task_data).execute()
-                    st.success("Task added!")
+                    # Validate hash existence on xcontest API
+                    validate_task = fetch_task_from_api(task_hash.strip())
+                    if not validate_task:
+                        st.error(f"Task with hash '{task_hash}' could not be loaded from XContest. Double check the code.")
+                    else:
+                        task_data = {
+                            "description": desc,
+                            "designer": designer,
+                            "max_score": max_score,
+                            "task_hash": task_hash.strip()
+                        }
+                        supabase.table("tasks").insert(task_data).execute()
+                        st.success("Task added successfully via Hash!")
 
     with tab2:
         st.subheader("Existing Tasks")
-        response = supabase.table("tasks").select("id, description, designer, max_score").execute()
+        response = supabase.table("tasks").select("id, description, designer, max_score, task_hash").execute()
         if response.data:
             df = pd.DataFrame(response.data)
             st.dataframe(df)
@@ -608,14 +550,12 @@ def render_admin_page():
 def render_leaderboard_page():
     st.title("🏆 Leaderboard")
 
-    # Fetch flights with related pilot and task details
-    flights_res = supabase.table("flights").select("*, pilots(name, safa_number), tasks(id, description, max_score, xctrack_json_data)").execute()
+    flights_res = supabase.table("flights").select("*, pilots(name, safa_number), tasks(id, description, max_score, task_hash)").execute()
 
     if not flights_res.data:
         st.info("No flights recorded yet.")
         return
 
-    # Fetch all tasks for dropdown choices
     tasks_res = supabase.table("tasks").select("*").execute()
     tasks_data = tasks_res.data if tasks_res.data else []
 
@@ -673,9 +613,13 @@ def render_leaderboard_page():
             return
 
         max_score = float(selected_task_obj["max_score"])
-        task_json = selected_task_obj["xctrack_json_data"]
+        task_hash = selected_task_obj["task_hash"]
 
-        # Calculate total task distance
+        task_json = fetch_task_from_api(task_hash)
+        if not task_json:
+            st.error("Failed to load task distances for breakdown.")
+            return
+
         turnpoints = task_json.get('turnpoints', [])
         leg_distances = []
         for i in range(1, len(turnpoints)):
@@ -684,7 +628,6 @@ def render_leaderboard_page():
             leg_distances.append(haversine_distance(lat1, lon1, lat2, lon2))
         total_task_distance = sum(leg_distances) if leg_distances else 1.0
 
-        # Filter flights for the chosen task
         task_flights = [f for f in flights_res.data if f.get("tasks", {}).get("description") == selected_option]
 
         if not task_flights:
@@ -707,7 +650,6 @@ def render_leaderboard_page():
 
             day_factor = round(min(1.0, participants / 5.0), 2)
 
-            # Derive base distance score & distance covered (km)
             base_dist = distance_score / day_factor if day_factor > 0 else distance_score
             max_dist_score = max_score * 0.5
             if max_dist_score > 0:
@@ -716,7 +658,6 @@ def render_leaderboard_page():
             else:
                 distance_covered_km = 0.0
 
-            # Duration and time difference vs fastest pilot
             if flight_time is not None and fastest_time is not None:
                 time_diff = round(flight_time - fastest_time, 2)
                 duration_str = f"{round(flight_time, 2)} mins"
@@ -759,3 +700,4 @@ elif page == "Leaderboard":
     render_leaderboard_page()
 elif page == "Admin":
     render_admin_page()
+
