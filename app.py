@@ -35,6 +35,34 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
 
+def get_edge_points(lat1: float, lon1: float, r1: float, lat2: float, lon2: float, r2: float):
+    """Calculates the shortest path coordinates from the edge of cylinder 1 to cylinder 2."""
+    lat_to_m = 111320.0
+    lon_to_m = 111320.0 * math.cos(math.radians((lat1 + lat2) / 2.0))
+
+    # Convert lat/lon to approximate local meters
+    y1, x1 = lat1 * lat_to_m, lon1 * lon_to_m
+    y2, x2 = lat2 * lat_to_m, lon2 * lon_to_m
+
+    dx = x2 - x1
+    dy = y2 - y1
+    dist = math.hypot(dx, dy)
+
+    # If cylinders overlap, fallback to centers to avoid mathematical errors
+    if dist <= r1 + r2:
+        return (lat1, lon1), (lat2, lon2)
+
+    ux, uy = dx / dist, dy / dist
+
+    # Edge coordinates in meters
+    ex1 = x1 + ux * r1
+    ey1 = y1 + uy * r1
+    ex2 = x2 - ux * r2
+    ey2 = y2 - uy * r2
+
+    # Convert back to lat/lon
+    return (ey1 / lat_to_m, ex1 / lon_to_m), (ey2 / lat_to_m, ex2 / lon_to_m)
+
 def parse_igc(igc_text):
     """Parses IGC file B-records into a Pandas DataFrame."""
     records = []
@@ -187,7 +215,7 @@ def render_welcome_page():
     st.title("🪂 Welcome to the SkyHigh Voyagers Project")
     st.markdown("""
     ### Elevate Your Cross-Country Flying
-    Welcome pilots! This platform is designed to help our paragliding community to enhance their cross country flying experience through a friendly, safe, and supporttive enviromenet promoting team and group flying.
+    Welcome pilots! This platform is designed to help our paragliding community enhance their cross country flying experience through a friendly, safe, and supportive environment promoting team and group flying.
     """)
 
     st.markdown("---")
@@ -205,7 +233,7 @@ def render_welcome_page():
         1. **Browse Tasks:** Visit the **Task Gallery** to explore task routes and waypoint coordinates.
         2. **Download File:** Click to download the task files directly to your device or scan the QR code for quick access.
         3. **Configure Your Instrument:** Import the downloaded task into your flight computer or navigation app (e.g., *XCTrack*, *Oudie*, or *SkyFlyHy*).
-        4. **Find flying buddies:** Coordinate with fellow pilots to fly together on the same day for maximum scoring potential.
+        4. **Find Flying Buddies:** Coordinate with fellow pilots to fly together on the same day for maximum scoring potential.
         5. **Fly the Route:** Take off, cross the SSS (Start Gate) pass through all sequential turnpoints, and reach Goal.
         6. **Submit Tracklog:** Head over to **Pilot Upload**, select your task, upload your tracklog file, and record your score on the leaderboard.
         """)
@@ -214,19 +242,18 @@ def render_welcome_page():
         st.markdown("### 📊 How the Scoring System Works")
         st.markdown("""
         We use a custom scoring algorithm to foster skill progression and reward pilots for both distance and speed, while also encouraging group flying.
-        All tasks are speedruns with a maxium possible score based on the task's nominal distance and difficulty.
-        You can fly any task at in anyday you wantwith your own pace.
+        All tasks are speedruns with a maximum possible score based on the task's nominal distance and difficulty.
+        You can fly any task on any day you want at your own pace.
         To maximize your score, aim to fly with at least 4 more pilots and reach the goal as quickly as possible while staying safe and within your skill level.
         Your results will be compared against all other pilots who flew the same task in the whole season.
-        As score will be adjusted based on how many unique pilots participated that day, please upload your tracklog even if you had a slow flight or did not reach the goal. Every flight counts toward the community and your own skill development!
+        As the score will be adjusted based on how many unique pilots participated that day, please upload your tracklog even if you had a slow flight or did not reach the goal. Every flight counts toward the community and your own skill development!
 
-        So gather your friends, plan your flight, and retrive toghter!
-
+        So gather your friends, plan your flight, and retrieve together!
 
         Details of the scoring system are as follows:
-        Each tasks has a maximum score based on its nominal distance and difficulty (e.g., 600 points for easy tasks, 1000 points for difficult tasks).
+        Each task has a maximum score based on its nominal distance and difficulty (e.g., 600 points for easy tasks, 1000 points for difficult tasks).
         The maximum score is split evenly between distance and speed components, with a multiplier applied based on the number of unique pilots flying the task on the same day.
-        In days with fewer than 5 pilots, the multiplier reduces the total score proportionally to encourage group flying and community engagement. For example, if only 3 pilots fly the task on a given day, each pilot's total score is multiplied by 0.6 (3/5). If 5 or more pilots fly the task, the multiplier is 1.0, allowing pilots to earn the full potential score.
+        On days with fewer than 5 pilots, the multiplier reduces the total score proportionally to encourage group flying and community engagement. For example, if only 3 pilots fly the task on a given day, each pilot's total score is multiplied by 0.6 (3/5). If 5 or more pilots fly the task, the multiplier is 1.0, allowing pilots to earn the full potential score.
 
         Flights are validated automatically against official task turnpoints. Scores consist of three core components:
 
@@ -234,10 +261,10 @@ def render_welcome_page():
           Earned proportionally based on how far along the task route you fly compared to total task length. So if you fly half the task distance, you earn only half of the maximum distance score.
 
         * **Speed Score (50% max):**
-          Awarded to only pilots completing the task and reach the goal. The time will be calculated from the time you toughed start of speed section (SSS) to when you touched the end of speed section (ESS). The fastest pilot in whole seasonreceives maximum speed points ("50%" of the maximum score). Speed scores for the following pilots are calculated with a minor time-decay penalty (4 pts/min).
+          Awarded to only pilots completing the task and reaching the goal. The time will be calculated from the time you touched the start of speed section (SSS) to when you touched the end of speed section (ESS). The fastest pilot in the whole season receives maximum speed points ("50%" of the maximum score). Speed scores for the following pilots are calculated with a minor time-decay penalty (4 pts/min).
 
         * **Overall Score:**
-          Socres from different tasks are combined to create an overall leaderboard. Your best score for each task is used to calculate your total score, encouraging pilots to improve their performance on tasks they have already flown.
+          Scores from different tasks are combined to create an overall leaderboard. Your best score for each task is used to calculate your total score, encouraging pilots to improve their performance on tasks they have already flown.
         """)
 
     st.markdown("---")
@@ -255,8 +282,8 @@ def render_task_gallery_page():
         st.info("No tasks available in the gallery yet. Check back soon!")
         return
 
-    # Select box to pick task
-    task_options = {f"Task #{t['id']} - {t['description']} (Max: {t['max_score']} pts)": t for t in tasks_data}
+    # Select box to pick task (Cleaned up titles)
+    task_options = {f"{t['description']} (Max: {t['max_score']} pts)": t for t in tasks_data}
     selected_label = st.selectbox("Select a Task to Preview:", options=list(task_options.keys()))
     task = task_options[selected_label]
 
@@ -280,12 +307,12 @@ def render_task_gallery_page():
         st.markdown(f"**Nominal Distance:** {round(total_dist_km, 2)} km")
         st.markdown(f"**Turnpoints:** {len(turnpoints)}")
 
-        # Download Task File Button
+        # Download Task File Button (.xctsk extension)
         json_str = json.dumps(task_json, indent=2)
         st.download_button(
-            label="📥 Download Task File (.json)",
+            label="📥 Download Task File (.xctsk)",
             data=json_str,
-            file_name=f"task_{task['id']}_{task['description'].replace(' ', '_')}.json",
+            file_name=f"task_{task['description'].replace(' ', '_')}.xctsk",
             mime="application/json",
             type="primary"
         )
@@ -309,7 +336,7 @@ def render_task_gallery_page():
             start_lon = float(turnpoints[0]['waypoint']['lon'])
             m = folium.Map(location=[start_lat, start_lon], zoom_start=11)
 
-            route_coords = []
+            # Draw Turnpoint Cylinders
             for idx, tp in enumerate(turnpoints):
                 lat = float(tp['waypoint']['lat'])
                 lon = float(tp['waypoint']['lon'])
@@ -317,9 +344,6 @@ def render_task_gallery_page():
                 tp_type = tp.get('type', 'TURNPOINT')
                 name = tp['waypoint'].get('name', f'TP{idx+1}')
 
-                route_coords.append([lat, lon])
-
-                # Color coding cylinders by turnpoint type
                 color = "blue"
                 if tp_type == "TAKEOFF":
                     color = "green"
@@ -343,9 +367,21 @@ def render_task_gallery_page():
                     icon=folium.Icon(color=color if color in ['red', 'blue', 'green', 'purple'] else 'blue', icon="info-sign")
                 ).add_to(m)
 
-            # Draw task path
-            if len(route_coords) > 1:
-                folium.PolyLine(route_coords, color="orange", weight=3, opacity=0.8, dash_array='5, 10').add_to(m)
+            # Draw Task Path (Edge to Edge / Minimum Distance)
+            for i in range(len(turnpoints) - 1):
+                tp1 = turnpoints[i]
+                tp2 = turnpoints[i+1]
+                lat1, lon1 = float(tp1['waypoint']['lat']), float(tp1['waypoint']['lon'])
+                lat2, lon2 = float(tp2['waypoint']['lat']), float(tp2['waypoint']['lon'])
+                r1, r2 = float(tp1['radius']), float(tp2['radius'])
+
+                # Calculate closest edges between the two turnpoints
+                (e_lat1, e_lon1), (e_lat2, e_lon2) = get_edge_points(lat1, lon1, r1, lat2, lon2, r2)
+
+                folium.PolyLine(
+                    [(e_lat1, e_lon1), (e_lat2, e_lon2)],
+                    color="orange", weight=3, opacity=0.8, dash_array='5, 10'
+                ).add_to(m)
 
             st_folium(m, width=800, height=550, key=f"task_gallery_map_{task['id']}")
         else:
@@ -388,6 +424,8 @@ def render_pilot_page():
             st.error("Please enter your name.")
         elif not igc_file:
             st.error("Please upload an IGC file.")
+        elif igc_file.size > 2 * 1024 * 1024:
+            st.error("File size exceeds the 2 MB limit.")
         else:
             task_json = selected_task['xctrack_json_data']
             igc_content = igc_file.read().decode("utf-8", errors="ignore")
@@ -537,10 +575,14 @@ def render_admin_page():
             desc = st.text_input("Description")
             designer = st.text_input("Designer")
             max_score = st.number_input("Max Score", min_value=0, max_value=1000)
-            task_file = st.file_uploader("Task JSON File", type=["json"])
+            task_file = st.file_uploader("Task File (.json or .xctsk)", type=["json", "xctsk"])
 
             if st.form_submit_button("Save Task"):
-                if task_file and desc:
+                if not task_file or not desc:
+                    st.error("Please provide both a description and a task file.")
+                elif task_file.size > 2 * 1024 * 1024:
+                    st.error("File size exceeds the 2 MB limit.")
+                else:
                     task_json = json.load(task_file)
                     task_data = {
                         "description": desc,
@@ -550,8 +592,6 @@ def render_admin_page():
                     }
                     supabase.table("tasks").insert(task_data).execute()
                     st.success("Task added!")
-                else:
-                    st.error("Please provide both a description and a JSON file.")
 
     with tab2:
         st.subheader("Existing Tasks")
@@ -566,7 +606,7 @@ def render_admin_page():
                 st.success("Task deleted. Refresh to update table.")
 
 def render_leaderboard_page():
-    st.title("🏆 Leadership Board")
+    st.title("🏆 Leaderboard")
 
     # Fetch flights with related pilot and task details
     flights_res = supabase.table("flights").select("*, pilots(name, safa_number), tasks(id, description, max_score, xctrack_json_data)").execute()
