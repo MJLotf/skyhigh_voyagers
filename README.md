@@ -1,4 +1,4 @@
-# skyhigh_voyagers# 🪂 SkyHigh Voyagers – Flight Task Evaluator
+# 🪂 SkyHigh Voyagers – Flight Task Evaluator
 
 SkyHigh Voyagers is a Streamlit-based web application for managing, validating, scoring, and ranking cross-country (XC) paragliding flights.
 
