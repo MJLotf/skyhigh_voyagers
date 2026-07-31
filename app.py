@@ -550,10 +550,32 @@ def render_admin_page():
 def render_leaderboard_page():
     st.title("🏆 Leaderboard")
 
-    flights_res = supabase.table("flights").select("*, pilots(name, safa_number), tasks(id, description, max_score, task_hash)").execute()
+    # Category selection dropdown
+    category_filter = st.selectbox("Category", options=["Everyone", "Only As", "As and Bs"])
+
+    flights_res = supabase.table("flights").select("*, pilots(name, safa_number, glider_class), tasks(id, description, max_score, task_hash)").execute()
 
     if not flights_res.data:
         st.info("No flights recorded yet.")
+        return
+
+    # Filter flights data based on category selection
+    filtered_flights = []
+    for f in flights_res.data:
+        pilot_data = f.get("pilots", {})
+        glider_class = pilot_data.get("glider_class") if pilot_data else None
+
+        if category_filter == "Only As":
+            if glider_class == "A":
+                filtered_flights.append(f)
+        elif category_filter == "As and Bs":
+            if glider_class in ["A", "B"]:
+                filtered_flights.append(f)
+        else:  # "Everyone"
+            filtered_flights.append(f)
+
+    if not filtered_flights:
+        st.info(f"No flights found for category: {category_filter}")
         return
 
     tasks_res = supabase.table("tasks").select("*").execute()
@@ -563,12 +585,12 @@ def render_leaderboard_page():
     selected_option = st.selectbox("Select View", options=task_options)
 
     if selected_option == "Overall":
-        st.subheader("📊 Overall Leaderboard")
+        st.subheader(f"📊 Overall Leaderboard ({category_filter})")
 
         pilot_task_scores = defaultdict(dict)
         pilot_info = {}
 
-        for f in flights_res.data:
+        for f in filtered_flights:
             pilot_data = f.get("pilots", {})
             task_data = f.get("tasks", {})
             if not pilot_data or not task_data:
@@ -602,10 +624,10 @@ def render_leaderboard_page():
             df_overall = df_overall.sort_values(by="Total Score", ascending=False).reset_index(drop=True)
             st.dataframe(df_overall.style.format({col: "{:.1f}" for col in df_overall.columns if col not in ["SAFA Number", "Pilot Name"]}), use_container_width=True)
         else:
-            st.info("No overall results found.")
+            st.info("No overall results found for this category.")
 
     else:
-        st.subheader(f"📌 Task Breakdown & Validation: {selected_option}")
+        st.subheader(f"📌 Task Breakdown & Validation: {selected_option} ({category_filter})")
 
         selected_task_obj = next((t for t in tasks_data if t["description"] == selected_option), None)
         if not selected_task_obj:
@@ -628,10 +650,10 @@ def render_leaderboard_page():
             leg_distances.append(haversine_distance(lat1, lon1, lat2, lon2))
         total_task_distance = sum(leg_distances) if leg_distances else 1.0
 
-        task_flights = [f for f in flights_res.data if f.get("tasks", {}).get("description") == selected_option]
+        task_flights = [f for f in filtered_flights if f.get("tasks", {}).get("description") == selected_option]
 
         if not task_flights:
-            st.info("No flights recorded for this task yet.")
+            st.info("No flights recorded for this task under the selected category.")
             return
 
         completed_times = [f["flight_time_minutes"] for f in task_flights if f.get("flight_time_minutes") is not None]
@@ -642,6 +664,7 @@ def render_leaderboard_page():
             pilot_data = f.get("pilots", {})
             safa = pilot_data.get("safa_number")
             name = pilot_data.get("name")
+            g_class = pilot_data.get("glider_class")
 
             distance_score = float(f.get("distance_score", 0))
             total_score = float(f.get("total_score", 0))
@@ -669,6 +692,7 @@ def render_leaderboard_page():
             breakdown_rows.append({
                 "SAFA Number": safa,
                 "Pilot Name": name,
+                "Glider Class": g_class,
                 "Max Score of Task": max_score,
                 "Day Factor": day_factor,
                 "Distance Covered (km)": round(distance_covered_km, 2),
@@ -700,4 +724,3 @@ elif page == "Leaderboard":
     render_leaderboard_page()
 elif page == "Admin":
     render_admin_page()
-
