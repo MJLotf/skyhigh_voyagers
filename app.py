@@ -339,7 +339,7 @@ def render_pilot_registration_page():
             safa_number = st.number_input("SAFA Number (ID)", min_value=1, step=1)
             pg_level = st.selectbox("PG Level", options=["PG2", "PG3", "PG4", "PG5"])
 
-        tnc_agreed = st.checkbox("I read the Terms and Conditions and agrees with it")
+        tnc_agreed = st.checkbox("Terms and Conditions: I agree to follow the SAFA and local club rules. I understand that flying is inherently risky and I am responsible for my own safety. I will fly responsibly within my skill levels and always prioritize safety.", value=False)
         submit_registration = st.form_submit_button("Register Pilot", type="primary")
 
     if submit_registration:
@@ -533,7 +533,7 @@ def render_flight_upload_page():
                         "participants": unique_count
                     }).eq("id", f["id"]).execute()
 
-            st.success(f"Flight submitted! Scores for Task {selected_task['id']} updated based on global speed and daily team sizes.")
+            st.success(f"Flight submitted! Scores for {selected_task['description']} updated based on global speed and daily team sizes.")
             del st.session_state["eval_data"]
 
 def render_admin_page():
