@@ -132,7 +132,9 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
                 validated_now = True
         elif tp_type == 'SSS':
             direction = sss_info.get('direction', 'EXIT')
-            gate_open = (sss_gate_time is None) or (fix['time'] >= sss_gate_time)
+
+            # FIX 2: Ignore gate open time; early starts are scored fully
+            gate_open = True
 
             if direction == 'EXIT':
                 if is_inside: was_inside_sss = True
@@ -161,9 +163,9 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
                 pilot_distance += leg_distances[current_tp_idx - 1]
             current_tp_idx += 1
 
-    # Calculate flight time in minutes between SSS and ESS/Goal
+    # FIX 1: Only calculate flight_time_mins if the task was fully completed (reached the goal)
     flight_time_mins = None
-    if start_time and end_time:
+    if start_time and end_time and current_tp_idx == total_tps:
         t1 = start_time.hour * 60 + start_time.minute + start_time.second / 60.0
         t2 = end_time.hour * 60 + end_time.minute + end_time.second / 60.0
         flight_time_mins = t2 - t1
@@ -336,14 +338,16 @@ def render_pilot_page():
         st.warning("No tasks available. An admin needs to create tasks first.")
         return
 
-    # Pilot inputs form
+    # Pilot inputs form - FIX 4: Added PG Level drop down
     with st.form("pilot_inputs_form"):
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             pilot_name = st.text_input("Pilot Name")
         with col2:
             safa_number = st.number_input("SAFA Number (ID)", min_value=1, step=1)
         with col3:
+            pg_level = st.selectbox("PG Level", options=["PG2", "PG3", "PG4", "PG5"])
+        with col4:
             glider_class = st.selectbox("Glider Class", options=['A', 'B', 'C', 'D', 'CCC'])
 
         # Task Selection
@@ -386,9 +390,10 @@ def render_pilot_page():
                     st.session_state["eval_data"] = {
                         "pilot_name": pilot_name,
                         "safa_number": safa_number,
+                        "pg_level": pg_level,
                         "glider_class": glider_class,
                         "selected_task": selected_task,
-                        "task_json": task_json,  # Stored here to avoid re-fetching on render
+                        "task_json": task_json,
                         "igc_df": igc_df,
                         "flight_date": flight_date,
                         "validation_results": validation_results,
@@ -432,21 +437,22 @@ def render_pilot_page():
             st_folium(m, width=1200, height=500, key="preview_flight_map")
 
         if st.button("Submit Flight to Database", type="primary"):
-            # Upsert Pilot
+            # FIX 3 & 4: pg_level is pilot attribute; glider_class removed from pilot
             pilot_data = {
                 "safa_number": data["safa_number"],
                 "name": data["pilot_name"],
-                "glider_class": data["glider_class"]
+                "pg_level": data["pg_level"]
             }
             supabase.table("pilots").upsert(pilot_data).execute()
 
             flight_time = data["validation_results"].get('flight_time_mins')
 
-            # Insert current flight
+            # FIX 3: glider_class attached directly to the flight
             flight_data = {
                 "pilot_id": data["safa_number"],
                 "task_id": selected_task['id'],
                 "flight_date": data["flight_date"],
+                "glider_class": data["glider_class"],
                 "base_distance_score": round(data["base_distance_score"], 2),
                 "speed_score": 0,
                 "distance_score": round(data["base_distance_score"], 2),
@@ -550,10 +556,12 @@ def render_admin_page():
 def render_leaderboard_page():
     st.title("🏆 Leaderboard")
 
-    # Category selection dropdown
-    category_filter = st.selectbox("Category", options=["Everyone", "Only As", "As and Bs"])
+    # FIX 4: Updated category selection options
+    category_options = ["Overall", "Only As", "As and Bs", "Only PG2s", "PG2s and PG3s", "PG4 or less"]
+    category_filter = st.selectbox("Category", options=category_options)
 
-    flights_res = supabase.table("flights").select("*, pilots(name, safa_number, glider_class), tasks(id, description, max_score, task_hash)").execute()
+    # FIX 3 & 4: Fetch pg_level from pilots and glider_class from flights
+    flights_res = supabase.table("flights").select("*, pilots(name, safa_number, pg_level), tasks(id, description, max_score, task_hash)").execute()
 
     if not flights_res.data:
         st.info("No flights recorded yet.")
@@ -563,7 +571,8 @@ def render_leaderboard_page():
     filtered_flights = []
     for f in flights_res.data:
         pilot_data = f.get("pilots", {})
-        glider_class = pilot_data.get("glider_class") if pilot_data else None
+        glider_class = f.get("glider_class")
+        pg_level = pilot_data.get("pg_level") if pilot_data else None
 
         if category_filter == "Only As":
             if glider_class == "A":
@@ -571,7 +580,16 @@ def render_leaderboard_page():
         elif category_filter == "As and Bs":
             if glider_class in ["A", "B"]:
                 filtered_flights.append(f)
-        else:  # "Everyone"
+        elif category_filter == "Only PG2s":
+            if pg_level == "PG2":
+                filtered_flights.append(f)
+        elif category_filter == "PG2s and PG3s":
+            if pg_level in ["PG2", "PG3"]:
+                filtered_flights.append(f)
+        elif category_filter == "PG4 or less":
+            if pg_level in ["PG2", "PG3", "PG4"]:
+                filtered_flights.append(f)
+        else:  # "Overall" / "Everyone"
             filtered_flights.append(f)
 
     if not filtered_flights:
@@ -664,7 +682,7 @@ def render_leaderboard_page():
             pilot_data = f.get("pilots", {})
             safa = pilot_data.get("safa_number")
             name = pilot_data.get("name")
-            g_class = pilot_data.get("glider_class")
+            g_class = f.get("glider_class")
 
             distance_score = float(f.get("distance_score", 0))
             total_score = float(f.get("total_score", 0))
