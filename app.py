@@ -216,12 +216,13 @@ def render_welcome_page():
 
         st.markdown("### 🛠️ How to Set Up & Fly a Task")
         st.markdown("""
-        1. **Browse Tasks:** Visit the **Task Gallery** to explore task routes and waypoint coordinates.
-        2. **Download File:** Click to download the task files directly to your device or scan the QR code for quick access.
-        3. **Configure Your Instrument:** Import the downloaded task into your flight computer or navigation app (e.g., *XCTrack*, *Oudie*, or *SkyFlyHy*).
-        4. **Find Flying Buddies:** Coordinate with fellow pilots to fly together on the same day for maximum scoring potential.
-        5. **Fly the Route:** Take off, cross the SSS (Start Gate) pass through all sequential turnpoints, and reach Goal.
-        6. **Submit Tracklog:** Head over to **Flight Upload**, select your task, upload your tracklog file, and record your score on the leaderboard.
+        1. **Register as a Pilot:** Navigate to **Pilot Registration** and enter your details to create your profile.
+        2. **Browse Tasks:** Visit the **Task Gallery** to explore task routes and waypoint coordinates.
+        3. **Download File:** Click to download the task files directly to your device or scan the QR code for quick access.
+        4. **Configure Your Instrument:** Import the downloaded task into your flight computer or navigation app (e.g., *XCTrack*, *Oudie*, or *SkyFlyHy*).
+        5. **Find Flying Buddies:** Coordinate with fellow pilots to fly together on the same day for maximum scoring potential.
+        6. **Fly the Route:** Take off, cross the SSS (Start Gate) pass through all sequential turnpoints, and reach Goal.
+        7. **Submit Tracklog:** Head over to **Flight Upload**, select your task, upload your tracklog file, and record your score on the leaderboard.
         """)
 
     with col2:
@@ -254,7 +255,7 @@ def render_welcome_page():
         """)
 
     st.markdown("---")
-    st.success("Ready to fly? Head over to **Task Gallery** to pick your task, or **Flight Upload** to evaluate a completed flight!")
+    st.success("Ready to fly? **Register** yourself and head over to **Task Gallery** to pick your task, or **Flight Upload** to evaluate a completed flight!")
 
 
 def render_task_gallery_page():
@@ -288,7 +289,6 @@ def render_task_gallery_page():
         st.subheader(task['description'])
         st.markdown(f"**Designer:** {task.get('designer', 'N/A')}")
         st.markdown(f"**Max Task Score:** {task.get('max_score', 1000)} pts")
-        st.markdown(f"**Task Hash:** `{task_hash}`")
 
         # Link directly to the XContest viewer tool
         xcontest_url = f"https://tools.xcontest.org/xctsk/load?taskCode={task_hash}"
@@ -768,7 +768,7 @@ def render_leaderboard_page():
 # -------------------------------------------------------------------
 # Navigation Routing
 # -------------------------------------------------------------------
-page = st.sidebar.radio("Navigation", ["Welcome", "Task Gallery", "Pilot Registration", "Flight Upload", "Leaderboard", "Admin"])
+page = st.sidebar.radio("Navigation", ["Welcome",  "Pilot Registration", "Task Gallery", "Flight Upload", "Leaderboard", "Admin"])
 
 if page == "Welcome":
     render_welcome_page()
