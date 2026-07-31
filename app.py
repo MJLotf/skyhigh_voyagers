@@ -248,7 +248,7 @@ def render_welcome_page():
           Earned proportionally based on how far along the task route you fly compared to total task length. So if you fly half the task distance, you earn only half of the maximum distance score.
 
         * **Speed Score (50% max):**
-          Awarded to only pilots completing the task and reaching the goal. The time will be calculated from the time you touched the start of speed section (SSS) to when you touched the end of speed section (ESS). The fastest pilot in the whole season receives maximum speed points ("50%" of the maximum score). Speed scores for the following pilots are calculated with a minor time-decay penalty (4 pts/min).
+          Awarded to only pilots completing the task and reaching the goal. The time will be calculated from the time you touched the start of speed section (SSS) to when you touched the end of speed section (ESS). The fastest pilot of the season in each specific task receives maximum speed points ("50%" of the maximum score). Speed scores for the following pilots are calculated with a minor time-decay penalty (4 pts/min).
 
         * **Overall Score:**
           Scores from different tasks are combined to create an overall leaderboard. Your best score for each task is used to calculate your total score, encouraging pilots to improve their performance on tasks they have already flown.
