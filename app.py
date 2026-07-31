@@ -270,6 +270,9 @@ def render_task_gallery_page():
         st.info("No tasks available in the gallery yet. Check back soon!")
         return
 
+    # Sort tasks by description
+    tasks_data = sorted(tasks_data, key=lambda x: x.get('description', ''))
+
     # Select box to pick task
     task_options = {f"{t['description']} (Max: {t['max_score']} pts)": t for t in tasks_data}
     selected_label = st.selectbox("Select a Task to Preview:", options=list(task_options.keys()))
@@ -373,6 +376,9 @@ def render_flight_upload_page():
     if not tasks_data:
         st.warning("No tasks available. An admin needs to create tasks first.")
         return
+
+    # Sort tasks by description
+    tasks_data = sorted(tasks_data, key=lambda x: x.get('description', ''))
 
     # Pilot inputs form - Reduced fields as requested
     with st.form("pilot_inputs_form"):
@@ -579,6 +585,7 @@ def render_admin_page():
         response = supabase.table("tasks").select("id, description, designer, max_score, task_hash").execute()
         if response.data:
             df = pd.DataFrame(response.data)
+            df = df.sort_values(by="description").reset_index(drop=True)
             st.dataframe(df)
 
             del_id = st.number_input("Task ID to Delete", min_value=1, step=1)
@@ -629,6 +636,9 @@ def render_leaderboard_page():
 
     tasks_res = supabase.table("tasks").select("*").execute()
     tasks_data = tasks_res.data if tasks_res.data else []
+
+    # Sort tasks by description
+    tasks_data = sorted(tasks_data, key=lambda x: x.get('description', ''))
 
     task_options = ["Overall"] + [t["description"] for t in tasks_data]
     selected_option = st.selectbox("Select View", options=task_options)
