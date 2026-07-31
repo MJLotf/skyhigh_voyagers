@@ -10,7 +10,7 @@ from supabase import create_client, Client
 from collections import defaultdict
 
 # Set page layout
-st.set_page_config(page_title="Flight Task Evaluator", layout="wide")
+st.set_page_config(page_title="SkyHigh Voyagers", layout="wide")
 
 # --- Database Connection ---
 @st.cache_resource
