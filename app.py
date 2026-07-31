@@ -221,7 +221,7 @@ def render_welcome_page():
         3. **Configure Your Instrument:** Import the downloaded task into your flight computer or navigation app (e.g., *XCTrack*, *Oudie*, or *SkyFlyHy*).
         4. **Find Flying Buddies:** Coordinate with fellow pilots to fly together on the same day for maximum scoring potential.
         5. **Fly the Route:** Take off, cross the SSS (Start Gate) pass through all sequential turnpoints, and reach Goal.
-        6. **Submit Tracklog:** Head over to **Pilot Upload**, select your task, upload your tracklog file, and record your score on the leaderboard.
+        6. **Submit Tracklog:** Head over to **Flight Upload**, select your task, upload your tracklog file, and record your score on the leaderboard.
         """)
 
     with col2:
@@ -254,7 +254,7 @@ def render_welcome_page():
         """)
 
     st.markdown("---")
-    st.success("Ready to fly? Head over to **Task Gallery** to pick your task, or **Pilot Upload** to evaluate a completed flight!")
+    st.success("Ready to fly? Head over to **Task Gallery** to pick your task, or **Flight Upload** to evaluate a completed flight!")
 
 
 def render_task_gallery_page():
@@ -326,8 +326,44 @@ def render_task_gallery_page():
         st.image(img_url, caption=f"Map for {task['description']}", width="stretch")
 
 
-def render_pilot_page():
-    st.title("👨‍✈️ Pilot Flight Submission")
+def render_pilot_registration_page():
+    st.title("📝 Pilot Registration")
+    st.markdown("New to the platform? Register here by providing your details.")
+
+    with st.form("pilot_registration_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            first_name = st.text_input("First Name")
+            last_name = st.text_input("Last Name")
+        with col2:
+            safa_number = st.number_input("SAFA Number (ID)", min_value=1, step=1)
+            pg_level = st.selectbox("PG Level", options=["PG2", "PG3", "PG4", "PG5"])
+
+        tnc_agreed = st.checkbox("I read the Terms and Conditions and agrees with it")
+        submit_registration = st.form_submit_button("Register Pilot", type="primary")
+
+    if submit_registration:
+        if not tnc_agreed:
+            st.error("You must agree to the Terms and Conditions before proceeding.")
+        elif not first_name or not last_name:
+            st.error("Please enter both First Name and Last Name.")
+        else:
+            full_name = f"{first_name.strip()} {last_name.strip()}"
+            pilot_data = {
+                "safa_number": safa_number,
+                "name": full_name,
+                "pg_level": pg_level
+            }
+            try:
+                supabase.table("pilots").upsert(pilot_data).execute()
+                st.success(f"Successfully registered {full_name} (SAFA: {safa_number})!")
+                st.info("You can now navigate to the 'Flight Upload' page to submit your flights.")
+            except Exception as e:
+                st.error(f"Error saving registration to database: {e}")
+
+
+def render_flight_upload_page():
+    st.title("👨‍✈️ Flight Upload")
     st.markdown("Select a task, upload your IGC file, preview your flight, and submit your score.")
 
     # Fetch tasks from DB
@@ -338,17 +374,15 @@ def render_pilot_page():
         st.warning("No tasks available. An admin needs to create tasks first.")
         return
 
-    # Pilot inputs form - FIX 4: Added PG Level drop down
+    # Pilot inputs form - Reduced fields as requested
     with st.form("pilot_inputs_form"):
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            pilot_name = st.text_input("Pilot Name")
-        with col2:
             safa_number = st.number_input("SAFA Number (ID)", min_value=1, step=1)
-        with col3:
-            pg_level = st.selectbox("PG Level", options=["PG2", "PG3", "PG4", "PG5"])
-        with col4:
+        with col2:
             glider_class = st.selectbox("Glider Class", options=['A', 'B', 'C', 'D', 'CCC'])
+        with col3:
+            paraglider = st.text_input("Paraglider (e.g., Flow Cosmos 2)")
 
         # Task Selection
         task_options = {f"{t['description']} (Max Score: {t['max_score']})": t for t in tasks_data}
@@ -360,46 +394,51 @@ def render_pilot_page():
         preview_button = st.form_submit_button("Preview & Evaluate")
 
     if preview_button:
-        if not pilot_name:
-            st.error("Please enter your name.")
-        elif not igc_file:
+        if not igc_file:
             st.error("Please upload an IGC file.")
         elif igc_file.size > 2 * 1024 * 1024:
             st.error("File size exceeds the 2 MB limit.")
         else:
-            task_hash = selected_task.get("task_hash")
-            task_json = fetch_task_from_api(task_hash)
+            # Check if SAFA number exists in pilots table
+            pilot_check = supabase.table("pilots").select("name").eq("safa_number", safa_number).execute()
 
-            if not task_json:
-                st.error("Could not retrieve task parameters from XContest API. Validation cannot proceed.")
+            if not pilot_check.data:
+                st.error("SAFA number not found. Please register first in the Pilot Registration page.")
             else:
-                igc_content = igc_file.read().decode("utf-8", errors="ignore")
-                igc_df, parsed_name, flight_date = parse_igc(igc_content)
+                pilot_name = pilot_check.data[0]['name']
+                task_hash = selected_task.get("task_hash")
+                task_json = fetch_task_from_api(task_hash)
 
-                if igc_df.empty:
-                    st.error("Invalid IGC file or no valid fixes found.")
+                if not task_json:
+                    st.error("Could not retrieve task parameters from XContest API. Validation cannot proceed.")
                 else:
-                    validation_results = validate_task_flight(task_json, igc_df.to_dict('records'))
-                    max_score = float(selected_task['max_score'])
+                    igc_content = igc_file.read().decode("utf-8", errors="ignore")
+                    igc_df, parsed_name, flight_date = parse_igc(igc_content)
 
-                    # Calculate Base Distance Score
-                    dist_ratio = validation_results['pilot_distance'] / max(validation_results['total_task_distance'], 1)
-                    dist_ratio = min(dist_ratio, 1.0)
-                    base_distance_score = (max_score * 0.5) * dist_ratio
+                    if igc_df.empty:
+                        st.error("Invalid IGC file or no valid fixes found.")
+                    else:
+                        validation_results = validate_task_flight(task_json, igc_df.to_dict('records'))
+                        max_score = float(selected_task['max_score'])
 
-                    st.session_state["eval_data"] = {
-                        "pilot_name": pilot_name,
-                        "safa_number": safa_number,
-                        "pg_level": pg_level,
-                        "glider_class": glider_class,
-                        "selected_task": selected_task,
-                        "task_json": task_json,
-                        "igc_df": igc_df,
-                        "flight_date": flight_date,
-                        "validation_results": validation_results,
-                        "base_distance_score": base_distance_score,
-                        "estimated_score": base_distance_score
-                    }
+                        # Calculate Base Distance Score
+                        dist_ratio = validation_results['pilot_distance'] / max(validation_results['total_task_distance'], 1)
+                        dist_ratio = min(dist_ratio, 1.0)
+                        base_distance_score = (max_score * 0.5) * dist_ratio
+
+                        st.session_state["eval_data"] = {
+                            "pilot_name": pilot_name,
+                            "safa_number": safa_number,
+                            "glider_class": glider_class,
+                            "paraglider": paraglider,
+                            "selected_task": selected_task,
+                            "task_json": task_json,
+                            "igc_df": igc_df,
+                            "flight_date": flight_date,
+                            "validation_results": validation_results,
+                            "base_distance_score": base_distance_score,
+                            "estimated_score": base_distance_score
+                        }
 
     if "eval_data" in st.session_state:
         data = st.session_state["eval_data"]
@@ -411,6 +450,7 @@ def render_pilot_page():
 
         st.markdown("---")
         st.subheader("📑 Evaluation Preview")
+        st.write(f"**Pilot:** {data['pilot_name']} (SAFA: {data['safa_number']})")
         st.write(f"**Turnpoints Reached:** {validation_results['turnpoints_completed']} / {validation_results['total_turnpoints']}")
         st.write(f"**Estimated Distance Score:** {round(estimated_score, 2)}")
 
@@ -437,22 +477,15 @@ def render_pilot_page():
             st_folium(m, width=1200, height=500, key="preview_flight_map")
 
         if st.button("Submit Flight to Database", type="primary"):
-            # FIX 3 & 4: pg_level is pilot attribute; glider_class removed from pilot
-            pilot_data = {
-                "safa_number": data["safa_number"],
-                "name": data["pilot_name"],
-                "pg_level": data["pg_level"]
-            }
-            supabase.table("pilots").upsert(pilot_data).execute()
-
             flight_time = data["validation_results"].get('flight_time_mins')
 
-            # FIX 3: glider_class attached directly to the flight
+            # glider_class and paraglider attached directly to the flight
             flight_data = {
                 "pilot_id": data["safa_number"],
                 "task_id": selected_task['id'],
                 "flight_date": data["flight_date"],
                 "glider_class": data["glider_class"],
+                "paraglider": data["paraglider"],
                 "base_distance_score": round(data["base_distance_score"], 2),
                 "speed_score": 0,
                 "distance_score": round(data["base_distance_score"], 2),
@@ -556,11 +589,9 @@ def render_admin_page():
 def render_leaderboard_page():
     st.title("🏆 Leaderboard")
 
-    # FIX 4: Updated category selection options
     category_options = ["Overall", "Only As", "As and Bs", "Only PG2s", "PG2s and PG3s", "PG4 or less"]
     category_filter = st.selectbox("Category", options=category_options)
 
-    # FIX 3 & 4: Fetch pg_level from pilots and glider_class from flights
     flights_res = supabase.table("flights").select("*, pilots(name, safa_number, pg_level), tasks(id, description, max_score, task_hash)").execute()
 
     if not flights_res.data:
@@ -607,6 +638,7 @@ def render_leaderboard_page():
 
         pilot_task_scores = defaultdict(dict)
         pilot_info = {}
+        pilot_gliders = defaultdict(set)
 
         for f in filtered_flights:
             pilot_data = f.get("pilots", {})
@@ -618,8 +650,12 @@ def render_leaderboard_page():
             name = pilot_data.get("name")
             task_desc = task_data.get("description")
             score = float(f.get("total_score", 0))
+            paraglider = f.get("paraglider")
 
             pilot_info[safa] = name
+            if paraglider:
+                pilot_gliders[safa].add(paraglider)
+
             current_max = pilot_task_scores[safa].get(task_desc, 0.0)
             if score > current_max:
                 pilot_task_scores[safa][task_desc] = score
@@ -628,7 +664,8 @@ def render_leaderboard_page():
         all_task_names = [t["description"] for t in tasks_data]
 
         for safa, name in pilot_info.items():
-            row = {"SAFA Number": safa, "Pilot Name": name}
+            gliders_used = ", ".join(sorted(pilot_gliders[safa])) if pilot_gliders[safa] else "N/A"
+            row = {"Pilot Name": name, "Glider": gliders_used}
             pilot_total = 0.0
             for t_name in all_task_names:
                 s = pilot_task_scores[safa].get(t_name, 0.0)
@@ -640,7 +677,8 @@ def render_leaderboard_page():
         if table_rows:
             df_overall = pd.DataFrame(table_rows)
             df_overall = df_overall.sort_values(by="Total Score", ascending=False).reset_index(drop=True)
-            st.dataframe(df_overall.style.format({col: "{:.1f}" for col in df_overall.columns if col not in ["SAFA Number", "Pilot Name"]}), use_container_width=True)
+            # Ensure Pilot Name and Glider are excluded from the floats styling
+            st.dataframe(df_overall.style.format({col: "{:.1f}" for col in df_overall.columns if col not in ["Pilot Name", "Glider"]}), use_container_width=True)
         else:
             st.info("No overall results found for this category.")
 
@@ -680,9 +718,9 @@ def render_leaderboard_page():
         breakdown_rows = []
         for f in task_flights:
             pilot_data = f.get("pilots", {})
-            safa = pilot_data.get("safa_number")
             name = pilot_data.get("name")
             g_class = f.get("glider_class")
+            paraglider = f.get("paraglider", "N/A")
 
             distance_score = float(f.get("distance_score", 0))
             total_score = float(f.get("total_score", 0))
@@ -708,9 +746,9 @@ def render_leaderboard_page():
                 time_diff_str = "N/A"
 
             breakdown_rows.append({
-                "SAFA Number": safa,
                 "Pilot Name": name,
                 "Glider Class": g_class,
+                "Glider": paraglider,
                 "Max Score of Task": max_score,
                 "Day Factor": day_factor,
                 "Distance Covered (km)": round(distance_covered_km, 2),
@@ -730,14 +768,16 @@ def render_leaderboard_page():
 # -------------------------------------------------------------------
 # Navigation Routing
 # -------------------------------------------------------------------
-page = st.sidebar.radio("Navigation", ["Welcome", "Task Gallery", "Pilot Upload", "Leaderboard", "Admin"])
+page = st.sidebar.radio("Navigation", ["Welcome", "Task Gallery", "Pilot Registration", "Flight Upload", "Leaderboard", "Admin"])
 
 if page == "Welcome":
     render_welcome_page()
 elif page == "Task Gallery":
     render_task_gallery_page()
-elif page == "Pilot Upload":
-    render_pilot_page()
+elif page == "Pilot Registration":
+    render_pilot_registration_page()
+elif page == "Flight Upload":
+    render_flight_upload_page()
 elif page == "Leaderboard":
     render_leaderboard_page()
 elif page == "Admin":
