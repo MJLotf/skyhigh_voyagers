@@ -17,6 +17,41 @@ st.set_page_config(page_title="SkyHigh Voyagers", layout="wide")
 # --- Custom CSS for Menu Toggle ---
 st.markdown("""
 <style>
+/* More breathing room between options */
+[data-testid="stRadioGroup"] {
+    gap: 4px !important;
+}
+
+/* Make the WHOLE row (not just the circle) a big, obvious tap target */
+[data-testid="stRadioOption"] {
+    padding: 14px 12px !important;
+    min-height: 48px !important;
+    border-radius: 10px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    transition: background-color 0.15s ease !important;
+}
+
+[data-testid="stRadioOption"]:hover {
+    background-color: rgba(150, 150, 150, 0.12) !important;
+}
+
+/* Bigger, bolder label text */
+[data-testid="stRadioOption"] [data-testid="stMarkdownContainer"] p {
+    font-size: 18px !important;
+}
+
+/* Bigger radio circle (outer ring) */
+[data-testid="stRadioOption"] > div > div > div:first-child {
+    width: 24px !important;
+    height: 24px !important;
+}
+
+/* Bigger inner dot to match */
+[data-testid="stRadioOption"] > div > div > div:first-child > div {
+    width: 14px !important;
+    height: 14px !important;
+}
 div[data-testid="stSidebarCollapseButton"],
 [data-testid="stToolbar"] > div > div:first-child {
     width: auto !important;
