@@ -12,6 +12,29 @@ from collections import defaultdict
 # Set page layout
 st.set_page_config(page_title="SkyHigh Voyagers", layout="wide")
 
+# --- Custom CSS for Menu Toggle ---
+st.markdown("""
+    <style>
+    /* Target the sidebar collapse button to enlarge it and add 'Menu' text */
+    [data-testid="collapsedControl"] {
+        width: auto !important;
+        padding: 0 15px !important;
+        background-color: rgba(128, 128, 128, 0.1);
+        border-radius: 8px !important;
+    }
+    [data-testid="collapsedControl"]::after {
+        content: "Menu";
+        margin-left: 8px;
+        font-size: 16px;
+        font-weight: 600;
+    }
+    [data-testid="collapsedControl"] svg {
+        height: 1.5rem;
+        width: 1.5rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # --- Database Connection ---
 @st.cache_resource
 def init_connection() -> Client:
@@ -214,6 +237,7 @@ def render_welcome_page():
         Our mission is to support pilot skill progression, foster friendly competition, and build a vibrant XC community. By providing accessible task downloads, real-time tracklog validation, and fair performance scoring, we make task flying simple and fun for everyone.
         """)
 
+    with col2:
         st.markdown("### 🛠️ How to Set Up & Fly a Task")
         st.markdown("""
         1. **Register as a Pilot:** Navigate to **Pilot Registration** and enter your details to create your profile.
@@ -225,38 +249,37 @@ def render_welcome_page():
         7. **Submit Tracklog:** Head over to **Flight Upload**, select your task, upload your tracklog file, and record your score on the leaderboard.
         """)
 
-    with col2:
-        st.markdown("### 📊 How the Scoring System Works")
-        st.markdown("""
-        We use a custom scoring algorithm to foster skill progression and reward pilots for both distance and speed, while also encouraging group flying.
-        All tasks are speedruns with a maximum possible score based on the task's nominal distance and difficulty.
-        You can fly any task on any day you want at your own pace.
-        To maximize your score, aim to fly with at least 4 more pilots and reach the goal as quickly as possible while staying safe and within your skill level.
-        Your results will be compared against all other pilots who flew the same task in the whole season.
-        As the score will be adjusted based on how many unique pilots participated that day, please upload your tracklog even if you had a slow flight or did not reach the goal. Every flight counts toward the community and your own skill development!
-
-        So gather your friends, plan your flight, and retrieve together!
-
-        Details of the scoring system are as follows:
-        Each task has a maximum score based on its nominal distance and difficulty (e.g., 600 points for easy tasks, 1000 points for difficult tasks).
-        The maximum score is split evenly between distance and speed components, with a multiplier applied based on the number of unique pilots flying the task on the same day.
-        On days with fewer than 5 pilots, the multiplier reduces the total score proportionally to encourage group flying and community engagement. For example, if only 3 pilots fly the task on a given day, each pilot's total score is multiplied by 0.6 (3/5). If 5 or more pilots fly the task, the multiplier is 1.0, allowing pilots to earn the full potential score.
-
-        Flights are validated automatically against official task turnpoints. Scores consist of three core components:
-
-        * **Distance Score (50% max):**
-          Earned proportionally based on how far along the task route you fly compared to total task length. So if you fly half the task distance, you earn only half of the maximum distance score.
-
-        * **Speed Score (50% max):**
-          Awarded to only pilots completing the task and reaching the goal. The time will be calculated from the time you touched the start of speed section (SSS) to when you touched the end of speed section (ESS). The fastest pilot of the season in each specific task receives maximum speed points ("50%" of the maximum score). Speed scores for the following pilots are calculated with a minor time-decay penalty (4 pts/min).
-
-        * **Overall Score:**
-          Scores from different tasks are combined to create an overall leaderboard. Your best score for each task is used to calculate your total score, encouraging pilots to improve their performance on tasks they have already flown.
-        """)
-
     st.markdown("---")
     st.success("Ready to fly? **Register** yourself and head over to **Task Gallery** to pick your task, or **Flight Upload** to evaluate a completed flight!")
 
+def render_scoring_system_page():
+    st.title("📊 How the Scoring System Works")
+    st.markdown("""
+    We use a custom scoring algorithm to foster skill progression and reward pilots for both distance and speed, while also encouraging group flying.
+    All tasks are speedruns with a maximum possible score based on the task's nominal distance and difficulty.
+    You can fly any task on any day you want at your own pace.
+    To maximize your score, aim to fly with at least 4 more pilots and reach the goal as quickly as possible while staying safe and within your skill level.
+    Your results will be compared against all other pilots who flew the same task in the whole season.
+    As the score will be adjusted based on how many unique pilots participated that day, please upload your tracklog even if you had a slow flight or did not reach the goal. Every flight counts toward the community and your own skill development!
+
+    So gather your friends, plan your flight, and retrieve together!
+
+    Details of the scoring system are as follows:
+    Each task has a maximum score based on its nominal distance and difficulty (e.g., 600 points for easy tasks, 1000 points for difficult tasks).
+    The maximum score is split evenly between distance and speed components, with a multiplier applied based on the number of unique pilots flying the task on the same day.
+    On days with fewer than 5 pilots, the multiplier reduces the total score proportionally to encourage group flying and community engagement. For example, if only 3 pilots fly the task on a given day, each pilot's total score is multiplied by 0.6 (3/5). If 5 or more pilots fly the task, the multiplier is 1.0, allowing pilots to earn the full potential score.
+
+    Flights are validated automatically against official task turnpoints. Scores consist of three core components:
+
+    * **Distance Score (50% max):**
+      Earned proportionally based on how far along the task route you fly compared to total task length. So if you fly half the task distance, you earn only half of the maximum distance score.
+
+    * **Speed Score (50% max):**
+      Awarded to only pilots completing the task and reaching the goal. The time will be calculated from the time you touched the start of speed section (SSS) to when you touched the end of speed section (ESS). The fastest pilot of the season in each specific task receives maximum speed points ("50%" of the maximum score). Speed scores for the following pilots are calculated with a minor time-decay penalty (4 pts/min).
+
+    * **Overall Score:**
+      Scores from different tasks are combined to create an overall leaderboard. Your best score for each task is used to calculate your total score, encouraging pilots to improve their performance on tasks they have already flown.
+    """)
 
 def render_task_gallery_page():
     st.title("🗺️ Task Gallery")
@@ -778,7 +801,7 @@ def render_leaderboard_page():
 # -------------------------------------------------------------------
 # Navigation Routing
 # -------------------------------------------------------------------
-page = st.sidebar.radio("Navigation", ["Welcome",  "Pilot Registration", "Task Gallery", "Flight Upload", "Leaderboard", "Admin"])
+page = st.sidebar.radio("Navigation", ["Welcome",  "Pilot Registration", "Task Gallery", "Flight Upload", "Leaderboard", "Scoring System", "Admin"])
 
 if page == "Welcome":
     render_welcome_page()
@@ -790,5 +813,7 @@ elif page == "Flight Upload":
     render_flight_upload_page()
 elif page == "Leaderboard":
     render_leaderboard_page()
+elif page == "Scoring System":
+    render_scoring_system_page()
 elif page == "Admin":
     render_admin_page()
