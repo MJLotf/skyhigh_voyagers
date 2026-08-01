@@ -13,26 +13,47 @@ from collections import defaultdict
 st.set_page_config(page_title="SkyHigh Voyagers", layout="wide")
 
 # --- Custom CSS for Menu Toggle ---
+# Using more aggressive CSS to override Streamlit's default clipping and fixed widths
+# --- Custom CSS for Menu Toggle ---
 st.markdown("""
-    <style>
-    /* Target the sidebar collapse button to enlarge it and add 'Menu' text */
-    [data-testid="collapsedControl"] {
-        width: auto !important;
-        padding: 0 15px !important;
-        background-color: rgba(128, 128, 128, 0.1);
-        border-radius: 8px !important;
-    }
-    [data-testid="collapsedControl"]::after {
-        content: "Menu";
-        margin-left: 8px;
-        font-size: 16px;
-        font-weight: 600;
-    }
-    [data-testid="collapsedControl"] svg {
-        height: 1.5rem;
-        width: 1.5rem;
-    }
-    </style>
+<style>
+div[data-testid="stSidebarCollapseButton"],
+[data-testid="stToolbar"] > div > div:first-child {
+    width: auto !important;
+    height: auto !important;
+    min-width: 140px !important;
+    overflow: visible !important;
+}
+
+div[data-testid="stSidebarCollapseButton"] button,
+[data-testid="stToolbar"] > div > div:first-child button {
+    width: auto !important;
+    height: auto !important;
+    min-height: 48px !important;
+    padding: 12px 20px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 10px !important;
+    background-color: rgba(150, 150, 150, 0.15) !important;
+    border: 1px solid rgba(150, 150, 150, 0.25) !important;
+    border-radius: 10px !important;
+}
+
+div[data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"],
+[data-testid="stToolbar"] > div > div:first-child [data-testid="stIconMaterial"] {
+    font-size: 28px !important;
+}
+
+div[data-testid="stSidebarCollapseButton"] button::after,
+[data-testid="stToolbar"] > div > div:first-child button::after {
+    content: "Menu" !important;
+    font-size: 18px !important;
+    font-weight: 600 !important;
+    color: inherit !important;
+    white-space: nowrap !important;
+}
+</style>
 """, unsafe_allow_html=True)
 
 # --- Database Connection ---
