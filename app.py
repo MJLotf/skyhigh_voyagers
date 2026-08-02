@@ -312,14 +312,14 @@ def render_welcome_page():
 def render_how_it_works_page():
     st.title("⚙️ How It Works")
     st.markdown("""
-    We are a passionate team of pilots dedicated to promoting skill development within our sport[cite: 1]. Our mission is to support pilot progression, foster friendly competition, and build a vibrant Cross Country (XC) community[cite: 1]. By providing accessible task downloads, real-time tracklog validation, and fair performance scoring, we strive to make task flying simple, rewarding, and fun for everyone[cite: 1].
+    We are a passionate team of pilots dedicated to promoting skill development within our sport. Our mission is to support pilot progression, foster friendly competition, and build a vibrant Cross Country (XC) community. By providing accessible task downloads, real-time tracklog validation, and fair performance scoring, we strive to make task flying simple, rewarding, and fun for everyone.
 
     ### Meet the Teams Behind the Scenes
-    To keep everything running smoothly and safely, our operations are divided into three dedicated groups[cite: 1]:
+    To keep everything running smoothly and safely, our operations are divided into three dedicated groups:
 
-    * **The Admin Team:** This team manages the app and ensures all technical aspects run flawlessly[cite: 1]. They actively build and maintain strong relationships with local clubs and SAFA, ensuring all tasks are conducted safely and in strict accordance with regulations[cite: 1]. The Admin team is also responsible for managing and resolving any disputes[cite: 1].
-    * **The Task Team:** Focused on course design, this team creates diverse and engaging tasks aimed at developing paragliding skills while prioritizing safety[cite: 1]. They are also responsible for continually reviewing and refining the scoring system[cite: 1].
-    * **The Safety Team:** An independent group of experienced pilots who review tasks to guarantee they are safe for our entire community to fly[cite: 1]. They also provide valuable feedback and recommendations to the Task Team to help optimize the scoring system[cite: 1].
+    * **The Admin Team:** This team manages the app and ensures all technical aspects run flawlessly. They actively build and maintain strong relationships with local clubs and SAFA, ensuring all tasks are conducted safely and in strict accordance with regulations. The Admin team is also responsible for managing and resolving any disputes.
+    * **The Task Team:** Focused on course design, this team creates diverse and engaging tasks aimed at developing paragliding skills while prioritizing safety. They are also responsible for continually reviewing and refining the scoring system.
+    * **The Safety Team:** An independent group of experienced pilots who review tasks to guarantee they are safe for our entire community to fly. They also provide valuable feedback and recommendations to the Task Team to help optimize the scoring system.
     """)
 
 def render_scoring_system_page():
