@@ -317,9 +317,9 @@ def render_how_it_works_page():
     ### Meet the Teams Behind the Scenes
     To keep everything running smoothly and safely, our operations are divided into three dedicated groups:
 
-    * **The Admin Team:** This team manages the app and ensures all technical aspects run flawlessly. They actively build and maintain strong relationships with local clubs and SAFA, ensuring all tasks are conducted safely and in strict accordance with regulations. The Admin team is also responsible for managing and resolving any disputes.
+    * **The Admin Team:** This team manages the app and ensures all technical aspects run flawlessly. They actively build and maintain strong relationships with local clubs and SAFA, ensuring all tasks are in strict accordance with regulations.
     * **The Task Team:** Focused on course design, this team creates diverse and engaging tasks aimed at developing paragliding skills while prioritizing safety. They are also responsible for continually reviewing and refining the scoring system.
-    * **The Safety Team:** An independent group of experienced pilots who review tasks to guarantee they are safe for our entire community to fly. They also provide valuable feedback and recommendations to the Task Team to help optimize the scoring system.
+    * **The Safety Team:** An independent group of experienced pilots who review tasks to guarantee they are safe for our community to fly. They also provide valuable feedback and recommendations to the Task Team to help optimize the scoring system.
     """)
 
 def render_scoring_system_page():
