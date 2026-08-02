@@ -297,16 +297,30 @@ def render_welcome_page():
         st.markdown("### 🛠️ How to Set Up & Fly a Task")
         st.markdown("""
         1. **Register as a Pilot:** Navigate to **Pilot Registration** and enter your details to create your profile.
-        2. **Browse Tasks:** Visit the **Task Gallery** to explore task routes and waypoint coordinates.
-        3. **Download File:** Click to download the task files directly to your device or scan the QR code for quick access.
-        4. **Configure Your Instrument:** Import the downloaded task into your flight computer or navigation app (e.g., *XCTrack*, *Oudie*, or *SkyFlyHy*).
-        5. **Find Flying Buddies:** Coordinate with fellow pilots to fly together on the same day for maximum scoring potential.
-        6. **Fly the Route:** Take off, cross the SSS (Start Gate) pass through all sequential turnpoints, and reach Goal.
-        7. **Submit Tracklog:** Head over to **Flight Upload**, select your task, upload your tracklog file, and record your score on the leaderboard.
+        2. **Join our dedicated telegram group:** Connect with fellow pilots for task discussions, flight planning, and community support using the following link: https://t.me/+ZsnQ_8zBf3FiYzM1
+        3. **Browse Tasks:** Visit the **Task Gallery** to explore task routes and waypoint coordinates.
+        4. **Download File:** Click to download the task files directly to your device or scan the QR code for quick access.
+        5. **Configure Your Instrument:** Import the downloaded task into your flight computer or navigation app (e.g., *XCTrack*, *Oudie*, or *SkyFlyHy*).
+        6. **Find Flying Buddies:** Coordinate with fellow pilots to fly together on the same day for maximum scoring potential.
+        7. **Fly the Route:** Take off, cross the SSS (Start Gate) pass through all sequential turnpoints, and reach Goal.
+        8. **Submit Tracklog:** Head over to **Flight Upload**, select your task, upload your tracklog file, and record your score on the leaderboard.
         """)
 
     st.markdown("---")
     st.success("Ready to fly? **Register** yourself and head over to **Task Gallery** to pick your task, or **Flight Upload** to evaluate a completed flight!")
+
+def render_how_it_works_page():
+    st.title("⚙️ How It Works")
+    st.markdown("""
+    We are a passionate team of pilots dedicated to promoting skill development within our sport[cite: 1]. Our mission is to support pilot progression, foster friendly competition, and build a vibrant Cross Country (XC) community[cite: 1]. By providing accessible task downloads, real-time tracklog validation, and fair performance scoring, we strive to make task flying simple, rewarding, and fun for everyone[cite: 1].
+
+    ### Meet the Teams Behind the Scenes
+    To keep everything running smoothly and safely, our operations are divided into three dedicated groups[cite: 1]:
+
+    * **The Admin Team:** This team manages the app and ensures all technical aspects run flawlessly[cite: 1]. They actively build and maintain strong relationships with local clubs and SAFA, ensuring all tasks are conducted safely and in strict accordance with regulations[cite: 1]. The Admin team is also responsible for managing and resolving any disputes[cite: 1].
+    * **The Task Team:** Focused on course design, this team creates diverse and engaging tasks aimed at developing paragliding skills while prioritizing safety[cite: 1]. They are also responsible for continually reviewing and refining the scoring system[cite: 1].
+    * **The Safety Team:** An independent group of experienced pilots who review tasks to guarantee they are safe for our entire community to fly[cite: 1]. They also provide valuable feedback and recommendations to the Task Team to help optimize the scoring system[cite: 1].
+    """)
 
 def render_scoring_system_page():
     st.title("📊 How the Scoring System Works")
@@ -857,10 +871,12 @@ def render_leaderboard_page():
 # -------------------------------------------------------------------
 # Navigation Routing
 # -------------------------------------------------------------------
-page = st.sidebar.radio("Navigation", ["Welcome",  "Pilot Registration", "Task Gallery", "Flight Upload", "Leaderboard", "Scoring System", "Admin"])
+page = st.sidebar.radio("Navigation", ["Welcome", "How It Works", "Pilot Registration", "Task Gallery", "Flight Upload", "Leaderboard", "Scoring System", "Admin"])
 
 if page == "Welcome":
     render_welcome_page()
+elif page == "How It Works":
+    render_how_it_works_page()
 elif page == "Task Gallery":
     render_task_gallery_page()
 elif page == "Pilot Registration":
