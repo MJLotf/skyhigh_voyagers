@@ -280,7 +280,7 @@ def render_welcome_page():
     st.title("🪂 Welcome to the SkyHigh Voyagers Project")
     st.markdown("""
     ### Elevate Your Cross-Country Flying
-    Welcome pilots! This platform is designed to help our paragliding community enhance their cross country flying experience through a friendly, safe, and supportive environment promoting team and group flying.
+    Welcome pilots! This platform is designed to help our paragliding community enhance their cross country flying experience through a friendly, safe, and supportive environment promoting group flying.
     """)
 
     st.markdown("---")
@@ -290,20 +290,17 @@ def render_welcome_page():
     with col1:
         st.markdown("### 🎯 Our Mission")
         st.info("""
-        Our mission is to support pilot skill progression, foster friendly competition, and build a vibrant XC community. By providing accessible task downloads, real-time tracklog validation, and fair performance scoring, we make task flying simple and fun for everyone.
+        Our mission is to support pilot skill progression, foster friendly task flying, and build a vibrant XC community. By providing accessible task downloads, dedicated Telegram group for communication and coordination, real-time tracklog validation, and informal scoring, we make task flying cross country accessible, simple and fun for everyone.
         """)
 
     with col2:
         st.markdown("### 🛠️ How to Set Up & Fly a Task")
         st.markdown("""
         1. **Register as a Pilot:** Navigate to **Pilot Registration** and enter your details to create your profile.
-        2. **Join our dedicated telegram group:** Connect with fellow pilots for task discussions, flight planning, and community support using the following link: https://t.me/+ZsnQ_8zBf3FiYzM1
-        3. **Browse Tasks:** Visit the **Task Gallery** to explore task routes and waypoint coordinates.
-        4. **Download File:** Click to download the task files directly to your device or scan the QR code for quick access.
-        5. **Configure Your Instrument:** Import the downloaded task into your flight computer or navigation app (e.g., *XCTrack*, *Oudie*, or *SkyFlyHy*).
-        6. **Find Flying Buddies:** Coordinate with fellow pilots to fly together on the same day for maximum scoring potential.
-        7. **Fly the Route:** Take off, cross the SSS (Start Gate) pass through all sequential turnpoints, and reach Goal.
-        8. **Submit Tracklog:** Head over to **Flight Upload**, select your task, upload your tracklog file, and record your score on the leaderboard.
+        2. **Browse Tasks:** Visit the **Task Gallery** to explore task routes and waypoint coordinates. Click to download the task files directly to your device or scan the QR code for quick access. Import the downloaded task into your flight computer or navigation app (e.g., *XCTrack*, *Oudie*, or *SkyFlyHy*).
+        3. **Find Flying Buddies:** Coordinate with fellow pilots to fly together on the same day for maximum scoring potential. You can join our dedicated **Telegram group** to connect with fellow interested pilots for task discussions, flight planning, and community support using the following link: https://t.me/+ZsnQ_8zBf3FiYzM1
+        4. **Fly the Route:** Take off, cross the SSS (Start Gate) pass through all sequential turnpoints, and reach Goal.
+        5. **Submit Tracklog:** Head over to **Flight Upload**, select your task, upload your tracklog file, and record your score on the leaderboard.
         """)
 
     st.markdown("---")
@@ -312,31 +309,30 @@ def render_welcome_page():
 def render_how_it_works_page():
     st.title("⚙️ How It Works")
     st.markdown("""
-    We are a passionate team of pilots dedicated to promoting skill development within our sport. Our mission is to support pilot progression, foster friendly competition, and build a vibrant Cross Country (XC) community. By providing accessible task downloads, real-time tracklog validation, and fair performance scoring, we strive to make task flying simple, rewarding, and fun for everyone.
+    We are a passionate team of pilots dedicated to promoting skill development within our sport. Our mission is to support pilot progression, foster friendly task flying, and build a vibrant Cross Country (XC) community.
 
     ### Meet the Teams Behind the Scenes
-    To keep everything running smoothly and safely, our operations are divided into three dedicated groups:
+    We are a team of volenteers. To keep everything running smoothly and safely, our operations are divided into three dedicated groups:
 
     * **The Admin Team:** This team manages the app and ensures all technical aspects run flawlessly. They actively build and maintain strong relationships with local clubs and SAFA, ensuring all tasks are in strict accordance with regulations.
     * **The Task Team:** Focused on course design, this team creates diverse and engaging tasks aimed at developing paragliding skills while prioritizing safety. They are also responsible for continually reviewing and refining the scoring system.
     * **The Safety Team:** An independent group of experienced pilots who review tasks to guarantee they are safe for our community to fly. They also provide valuable feedback and recommendations to the Task Team to help optimize the scoring system.
-    """)
 
-def render_scoring_system_page():
-    st.title("📊 How the Scoring System Works")
-    st.markdown("""
-    We use a custom scoring algorithm to foster skill progression and reward pilots for both distance and speed, while also encouraging group flying.
+        We use a custom scoring algorithm to foster skill progression and reward pilots for both distance and speed, while also encouraging group flying.
     All tasks are speedruns with a maximum possible score based on the task's nominal distance and difficulty.
     You can fly any task on any day you want at your own pace.
     To maximize your score, aim to fly with at least 4 more pilots and reach the goal as quickly as possible while staying safe and within your skill level.
     Your results will be compared against all other pilots who flew the same task in the whole season.
-    As the score will be adjusted based on how many unique pilots participated that day, please upload your tracklog even if you had a slow flight or did not reach the goal. Every flight counts toward the community and your own skill development!
+    As the score will be adjusted based on how many pilots participated that day, please upload your tracklog even if you had a slow flight or did not reach the goal. Every flight counts toward the community and your own skill development!
 
     So gather your friends, plan your flight, and retrieve together!
 
+
+    ### How the scoring system works?
+    The scoring system is designed to encourage group flying, skill progression, and safe task flying. It rewards pilots for both distance and speed while also considering the number of pilots flying the same task on the same day.
     Details of the scoring system are as follows:
     Each task has a maximum score based on its nominal distance and difficulty (e.g., 600 points for easy tasks, 1000 points for difficult tasks).
-    The maximum score is split evenly between distance and speed components, with a multiplier applied based on the number of unique pilots flying the task on the same day.
+    The maximum score is split evenly between distance and speed components, with a multiplier applied based on the number of pilots flying the task on the same day.
     On days with fewer than 5 pilots, the multiplier reduces the total score proportionally to encourage group flying and community engagement. For example, if only 3 pilots fly the task on a given day, each pilot's total score is multiplied by 0.6 (3/5). If 5 or more pilots fly the task, the multiplier is 1.0, allowing pilots to earn the full potential score.
 
     Flights are validated automatically against official task turnpoints. Scores consist of three core components:
@@ -349,7 +345,9 @@ def render_scoring_system_page():
 
     * **Overall Score:**
       Scores from different tasks are combined to create an overall leaderboard. Your best score for each task is used to calculate your total score, encouraging pilots to improve their performance on tasks they have already flown.
+
     """)
+
 
 def render_task_gallery_page():
     st.title("🗺️ Task Gallery")
@@ -871,7 +869,7 @@ def render_leaderboard_page():
 # -------------------------------------------------------------------
 # Navigation Routing
 # -------------------------------------------------------------------
-page = st.sidebar.radio("Navigation", ["Welcome", "How It Works", "Pilot Registration", "Task Gallery", "Flight Upload", "Leaderboard", "Scoring System", "Admin"])
+page = st.sidebar.radio("Navigation", ["Welcome",  "Pilot Registration", "Task Gallery", "Flight Upload", "Leaderboard", "How It Works", "Admin"])
 
 if page == "Welcome":
     render_welcome_page()
@@ -885,7 +883,5 @@ elif page == "Flight Upload":
     render_flight_upload_page()
 elif page == "Leaderboard":
     render_leaderboard_page()
-elif page == "Scoring System":
-    render_scoring_system_page()
 elif page == "Admin":
     render_admin_page()
