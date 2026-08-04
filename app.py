@@ -124,6 +124,9 @@ def parse_igc(igc_text):
             pilot_name = line.split(":", 1)[1].strip()
         elif line.startswith("HFDTE"):
             date_str = line[5:11]
+            if len(date_str) == 6:
+                # Format YYMMDD to YYYY-MM-DD for better readability
+                date_str = f"20{date_str[4:6]}-{date_str[2:4]}-{date_str[0:2]}"
 
         if line.startswith("B") and len(line) >= 35:
             try:
@@ -154,16 +157,20 @@ def parse_igc(igc_text):
     return pd.DataFrame(records), pilot_name, date_str
 
 def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
-    """Validates IGC fixes sequentially against task turnpoints and calculates times/distances."""
+    """Validates IGC fixes sequentially against task turnpoints and calculates times/distances.
+
+    Distance covered is credited two ways:
+      1. Full leg credit for every turnpoint the pilot actually validated (as before).
+      2. Partial credit for the leg currently in progress, based on the closest the
+         pilot got to the next required turnpoint before the track ends (or they
+         land out). This ensures pilots who don't finish the task still get an
+         accurate "distance made" figure instead of 0, and — critically — this
+         distance figure is completely independent of whether goal was reached.
+         Reaching goal only affects the speed score (via flight_time_mins below).
+    """
     turnpoints = task_data.get('turnpoints', [])
     sss_info = task_data.get('sss', {})
     goal_info = task_data.get('goal', {})
-
-    sss_gate_time = None
-    if sss_info.get('timeGates'):
-        gate_str = sss_info['timeGates'][0].replace('Z', '')
-        h, m, s = map(int, gate_str.split(':'))
-        sss_gate_time = time(h, m, s)
 
     goal_deadline = None
     if goal_info.get('deadline'):
@@ -179,7 +186,6 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
     # Tracking for scores & times
     start_time = None
     end_time = None
-    pilot_distance = 0.0
 
     # Pre-calculate distances between each turnpoint leg
     leg_distances = []
@@ -189,6 +195,17 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
         leg_distances.append(haversine_distance(lat1, lon1, lat2, lon2))
 
     total_task_distance = sum(leg_distances) if leg_distances else 1.0
+
+    # Cumulative distance covered by the time each turnpoint index is validated
+    # (cumulative_distance[i] = total distance flown once turnpoint i is reached).
+    cumulative_distance = [0.0] * total_tps
+    for i in range(1, total_tps):
+        cumulative_distance[i] = cumulative_distance[i - 1] + leg_distances[i - 1]
+
+    # Closest the pilot has gotten to the NEXT (not-yet-validated) turnpoint. Used to
+    # award partial credit for the in-progress leg if the pilot never officially
+    # validates it (landed out, missed the gate trigger, etc).
+    closest_approach = None
 
     for fix in igc_fixes:
         if current_tp_idx >= total_tps: break
@@ -201,6 +218,12 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
 
         dist = haversine_distance(fix['lat'], fix['lon'], tp_lat, tp_lon)
         is_inside = dist <= radius
+
+        # Track progress toward the current target turnpoint. Skipped for TAKEOFF
+        # since that "leg" has no meaningful distance-made component.
+        if tp_type != 'TAKEOFF':
+            if closest_approach is None or dist < closest_approach:
+                closest_approach = dist
 
         validated_now = False
 
@@ -234,9 +257,21 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
                 'type': tp_type,
                 'achieved_at': fix['time_str']
             })
-            if current_tp_idx > 0 and (current_tp_idx - 1) < len(leg_distances):
-                pilot_distance += leg_distances[current_tp_idx - 1]
             current_tp_idx += 1
+            closest_approach = None  # start tracking progress toward the new next tp
+
+    # --- Distance covered ---
+    # Full task distance if every turnpoint (including goal) was validated.
+    # Otherwise: full credit for completed legs + partial credit for the leg
+    # currently in progress, based on how close the pilot got to the next turnpoint.
+    if current_tp_idx >= total_tps:
+        pilot_distance = total_task_distance
+    else:
+        pilot_distance = cumulative_distance[current_tp_idx - 1] if current_tp_idx > 0 else 0.0
+        if current_tp_idx > 0 and closest_approach is not None:
+            leg_len = leg_distances[current_tp_idx - 1]
+            partial_credit = max(0.0, leg_len - closest_approach)
+            pilot_distance += min(partial_credit, leg_len)
 
     flight_time_mins = None
     if start_time and end_time and current_tp_idx == total_tps:
@@ -430,8 +465,8 @@ def render_pilot_registration_page():
             first_name = st.text_input("First Name")
             last_name = st.text_input("Last Name")
         with col2:
-            safa_number = st.number_input("SAFA Number (ID)", min_value=1, step=1)
-            pg_level = st.selectbox("PG Level", options=["PG2", "PG3", "PG4", "PG5"])
+            safa_number = st.number_input("SAFA Number (ID)", min_value=1, step=1, value=None)
+            pg_level = st.selectbox("PG Level", options=["PG2", "PG3", "PG4", "PG5"], index=None)
 
         tnc_agreed = st.checkbox("Terms and Conditions: I agree to follow the SAFA and local club rules. I understand that flying is inherently risky and I am responsible for my own safety. I will fly responsibly within my skill levels and always prioritize safety.", value=False)
         submit_registration = st.form_submit_button("Register Pilot", type="primary")
@@ -441,6 +476,10 @@ def render_pilot_registration_page():
             st.error("You must agree to the Terms and Conditions before proceeding.")
         elif not first_name or not last_name:
             st.error("Please enter both First Name and Last Name.")
+        elif safa_number is None:
+            st.error("Please enter your SAFA Number.")
+        elif pg_level is None:
+            st.error("Please select your PG Level.")
         else:
             full_name = f"{first_name.strip()} {last_name.strip()}"
             pilot_data = {
@@ -474,9 +513,9 @@ def render_flight_upload_page():
     with st.form("pilot_inputs_form"):
         col1, col2, col3 = st.columns(3)
         with col1:
-            safa_number = st.number_input("SAFA Number (ID)", min_value=1, step=1)
+            safa_number = st.number_input("SAFA Number (ID)", min_value=1, step=1, value=None)
         with col2:
-            glider_class = st.selectbox("Glider Class", options=['A', 'B', 'C', 'D', 'CCC'])
+            glider_class = st.selectbox("Glider Class", options=['A', 'B', 'C', 'D', 'CCC'], index=None)
         with col3:
             paraglider = st.text_input("Paraglider (e.g., Flow Cosmos 2)")
 
@@ -490,7 +529,11 @@ def render_flight_upload_page():
         preview_button = st.form_submit_button("Preview & Evaluate")
 
     if preview_button:
-        if not igc_file:
+        if safa_number is None:
+            st.error("Please enter your SAFA Number.")
+        elif glider_class is None:
+            st.error("Please select your Glider Class.")
+        elif not igc_file:
             st.error("Please upload an IGC file.")
         elif igc_file.size > 2 * 1024 * 1024:
             st.error("File size exceeds the 2 MB limit.")
@@ -517,6 +560,8 @@ def render_flight_upload_page():
                         max_score = float(selected_task['max_score'])
 
                         # Calculate Base Distance Score
+                        # NOTE: this is intentionally independent of whether goal was
+                        # reached — only the speed score below depends on that.
                         dist_ratio = validation_results['pilot_distance'] / max(validation_results['total_task_distance'], 1)
                         dist_ratio = min(dist_ratio, 1.0)
                         base_distance_score = (max_score * 0.5) * dist_ratio
@@ -546,8 +591,11 @@ def render_flight_upload_page():
         st.markdown("---")
         st.subheader("📑 Evaluation Preview")
         st.write(f"**Pilot:** {data['pilot_name']} (SAFA: {data['safa_number']})")
+        st.write(f"**Flight Date:** {data['flight_date']}")
         st.write(f"**Turnpoints Reached:** {validation_results['turnpoints_completed']} / {validation_results['total_turnpoints']}")
         st.write(f"**Estimated Distance Score:** {round(estimated_score, 2)}")
+        if not validation_results['task_completed']:
+            st.caption("Task not completed — distance score reflects progress made toward the next turnpoint; no speed score is awarded.")
 
         if validation_results['achieved_details']:
             st.dataframe(pd.DataFrame(validation_results['achieved_details']))
@@ -610,7 +658,16 @@ def render_flight_upload_page():
                     # Updated Day Factor: 0.5 + 0.5 * min(1.0, count / 5)
                     day_factor = 0.5 + 0.5 * min(1.0, unique_count / 5.0)
 
-                    base_dist = float(f.get("base_distance_score") or f.get("distance_score") or 0)
+                    # IMPORTANT: use None-checks here, not `or`, since a pilot who made
+                    # 0 real distance progress has a *legitimate* base_distance_score
+                    # of 0.0 — and `0.0 or x` would incorrectly fall through to x.
+                    base_dist = f.get("base_distance_score")
+                    if base_dist is None:
+                        base_dist = f.get("distance_score")
+                    if base_dist is None:
+                        base_dist = 0.0
+                    base_dist = float(base_dist)
+
                     base_speed = 0.0
 
                     # Speed Score = (Task max score * 0.5) * (Fastest time / Pilot time) if goal reached
@@ -737,7 +794,6 @@ def render_leaderboard_page():
 
         pilot_task_scores = defaultdict(dict)
         pilot_info = {}
-        pilot_gliders = defaultdict(set)
 
         for f in filtered_flights:
             pilot_data = f.get("pilots", {})
@@ -749,11 +805,8 @@ def render_leaderboard_page():
             name = pilot_data.get("name")
             task_desc = task_data.get("description")
             score = float(f.get("total_score", 0))
-            paraglider = f.get("paraglider")
 
             pilot_info[safa] = name
-            if paraglider:
-                pilot_gliders[safa].add(paraglider)
 
             current_max = pilot_task_scores[safa].get(task_desc, 0.0)
             if score > current_max:
@@ -763,8 +816,7 @@ def render_leaderboard_page():
         all_task_names = [t["description"] for t in tasks_data]
 
         for safa, name in pilot_info.items():
-            gliders_used = ", ".join(sorted(pilot_gliders[safa])) if pilot_gliders[safa] else "N/A"
-            row = {"Pilot Name": name, "Glider": gliders_used}
+            row = {"Pilot Name": name}
 
             scores_list = []
             for t_name in all_task_names:
@@ -780,7 +832,8 @@ def render_leaderboard_page():
         if table_rows:
             df_overall = pd.DataFrame(table_rows)
             df_overall = df_overall.sort_values(by="Total Score", ascending=False).reset_index(drop=True)
-            st.dataframe(df_overall.style.format({col: "{:.1f}" for col in df_overall.columns if col not in ["Pilot Name", "Glider"]}), use_container_width=True)
+            # Make sure to format all numeric columns properly, excluding 'Pilot Name'
+            st.dataframe(df_overall.style.format({col: "{:.1f}" for col in df_overall.columns if col not in ["Pilot Name"]}), use_container_width=True)
         else:
             st.info("No overall results found for this category.")
 
@@ -823,12 +876,13 @@ def render_leaderboard_page():
             name = pilot_data.get("name")
             g_class = f.get("glider_class")
             paraglider = f.get("paraglider", "N/A")
+            flight_date = f.get("flight_date", "N/A")
+            participants = f.get("participants", 1)
 
             distance_score = float(f.get("distance_score", 0))
             speed_score = float(f.get("speed_score", 0))
             total_score = float(f.get("total_score", 0))
             flight_time = f.get("flight_time_minutes")
-            participants = f.get("participants", 1)
 
             # Updated Day Factor calculation
             day_factor = round(0.5 + 0.5 * min(1.0, participants / 5.0), 2)
@@ -853,6 +907,8 @@ def render_leaderboard_page():
                 "Pilot Name": name,
                 "Glider Class": g_class,
                 "Glider": paraglider,
+                "Flight Date": flight_date,
+                "Number of Participants": participants,
                 "Max Score of Task": max_score,
                 "Day Factor": day_factor,
                 "Distance Covered (km)": round(distance_covered_km, 2),
