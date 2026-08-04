@@ -13,8 +13,6 @@ from collections import defaultdict
 st.set_page_config(page_title="SkyHigh Voyagers", layout="wide")
 
 # --- Custom CSS for Menu Toggle ---
-# Using more aggressive CSS to override Streamlit's default clipping and fixed widths
-# --- Custom CSS for Menu Toggle ---
 st.markdown("""
 <style>
 /* More breathing room between options */
@@ -211,8 +209,6 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
                 validated_now = True
         elif tp_type == 'SSS':
             direction = sss_info.get('direction', 'EXIT')
-
-            # FIX 2: Ignore gate open time; early starts are scored fully
             gate_open = True
 
             if direction == 'EXIT':
@@ -242,7 +238,6 @@ def validate_task_flight(task_data: dict, igc_fixes: list) -> dict:
                 pilot_distance += leg_distances[current_tp_idx - 1]
             current_tp_idx += 1
 
-    # FIX 1: Only calculate flight_time_mins if the task was fully completed (reached the goal)
     flight_time_mins = None
     if start_time and end_time and current_tp_idx == total_tps:
         t1 = start_time.hour * 60 + start_time.minute + start_time.second / 60.0
@@ -317,7 +312,7 @@ def render_how_it_works_page():
     * **The Task Team:** Focused on course design, this team creates diverse and engaging tasks aimed at developing paragliding skills while prioritizing safety. They are also responsible for continually reviewing and refining the scoring system.
     * **The Safety Team:** An independent group of experienced pilots who review tasks to guarantee they are safe for our community to fly. They also provide valuable feedback and recommendations to the Task Team to help optimize the scoring system.
 
-        ### How the scoring system works?
+    ### How the scoring system works?
 
     The scoring system is designed to encourage group flying, skill progression, and safe task flying. It rewards pilots for both distance and speed while also considering the number of pilots flying the same task on the same day.
     All tasks are speedruns with a maximum possible score based on the task's distance and difficulty.
@@ -384,7 +379,6 @@ def render_task_gallery_page():
         st.error("Invalid task configuration. Missing task hash.")
         return
 
-    # Fetch the actual task definition to enable downloading and passing to QR generator
     task_json = fetch_task_from_api(task_hash)
 
     col1, col2 = st.columns([1, 2])
@@ -394,7 +388,6 @@ def render_task_gallery_page():
         st.markdown(f"**Designer:** {task.get('designer', 'N/A')}")
         st.markdown(f"**Max Task Score:** {task.get('max_score', 1000)} pts")
 
-        # Link directly to the XContest viewer tool
         xcontest_url = f"https://tools.xcontest.org/xctsk/load?taskCode={task_hash}"
         st.markdown(f"[🌍 View Full Task & Turnpoints on XContest]({xcontest_url})")
 
@@ -410,7 +403,6 @@ def render_task_gallery_page():
             )
 
             st.markdown("### Scan to Load Task")
-            # Fetch QR Code via API
             qr_response = requests.post(
                 "https://tools.xcontest.org/api/xctsk/qr",
                 json=task_json,
@@ -418,14 +410,12 @@ def render_task_gallery_page():
             )
 
             if qr_response.status_code == 200:
-                # API returns SVG, which Streamlit handles best via HTML block
                 st.markdown(f"<div>{qr_response.text}</div>", unsafe_allow_html=True)
             else:
                 st.warning("Could not generate QR code at this time.")
 
     with col2:
         st.subheader("Task Route Map")
-        # Display the static JPEG map from the API endpoint
         img_url = f"https://tools.xcontest.org/api/xctsk/image/{task_hash}"
         st.image(img_url, caption=f"Map for {task['description']}", width="stretch")
 
@@ -481,7 +471,6 @@ def render_flight_upload_page():
     # Sort tasks by description
     tasks_data = sorted(tasks_data, key=lambda x: x.get('description', ''))
 
-    # Pilot inputs form - Reduced fields as requested
     with st.form("pilot_inputs_form"):
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -506,7 +495,6 @@ def render_flight_upload_page():
         elif igc_file.size > 2 * 1024 * 1024:
             st.error("File size exceeds the 2 MB limit.")
         else:
-            # Check if SAFA number exists in pilots table
             pilot_check = supabase.table("pilots").select("name").eq("safa_number", safa_number).execute()
 
             if not pilot_check.data:
@@ -564,7 +552,6 @@ def render_flight_upload_page():
         if validation_results['achieved_details']:
             st.dataframe(pd.DataFrame(validation_results['achieved_details']))
 
-        # Render Map internally for track comparison
         turnpoints = task_json.get('turnpoints', [])
         if turnpoints and not igc_df.empty:
             start_lat = float(turnpoints[0]['waypoint']['lat'])
@@ -586,7 +573,6 @@ def render_flight_upload_page():
         if st.button("Submit Flight to Database", type="primary"):
             flight_time = data["validation_results"].get('flight_time_mins')
 
-            # glider_class and paraglider attached directly to the flight
             flight_data = {
                 "pilot_id": data["safa_number"],
                 "task_id": selected_task['id'],
@@ -602,7 +588,7 @@ def render_flight_upload_page():
             }
             supabase.table("flights").insert(flight_data).execute()
 
-            # Master Recalculation Engine
+            # Master Recalculation Engine - Updated Formula Implementation
             flights_res = supabase.table("flights").select("*").eq("task_id", selected_task['id']).execute()
             all_task_flights = flights_res.data
 
@@ -620,17 +606,20 @@ def render_flight_upload_page():
                 for f in all_task_flights:
                     f_date = f.get("flight_date")
                     unique_count = len(daily_pilots[f_date]) if f_date else 1
-                    day_multiplier = min(1.0, unique_count / 5.0)
+
+                    # Updated Day Factor: 0.5 + 0.5 * min(1.0, count / 5)
+                    day_factor = 0.5 + 0.5 * min(1.0, unique_count / 5.0)
 
                     base_dist = float(f.get("base_distance_score") or f.get("distance_score") or 0)
                     base_speed = 0.0
 
-                    if f.get("flight_time_minutes") is not None and fastest_time is not None:
+                    # Speed Score = (Task max score * 0.5) * (Fastest time / Pilot time) if goal reached
+                    if f.get("flight_time_minutes") is not None and fastest_time is not None and f["flight_time_minutes"] > 0:
                         p_time = f["flight_time_minutes"]
-                        base_speed = max(0, (max_score * 0.5) - 4 * (p_time - fastest_time))
+                        base_speed = (max_score * 0.5) * (fastest_time / p_time)
 
-                    final_dist = base_dist * day_multiplier
-                    final_speed = base_speed * day_multiplier
+                    final_dist = base_dist * day_factor
+                    final_speed = base_speed * day_factor
                     final_total = final_dist + final_speed
 
                     supabase.table("flights").update({
@@ -667,7 +656,6 @@ def render_admin_page():
                 if not task_hash or not desc:
                     st.error("Please provide both a description and a task hash.")
                 else:
-                    # Validate hash existence on xcontest API
                     validate_task = fetch_task_from_api(task_hash.strip())
                     if not validate_task:
                         st.error(f"Task with hash '{task_hash}' could not be loaded from XContest. Double check the code.")
@@ -777,18 +765,21 @@ def render_leaderboard_page():
         for safa, name in pilot_info.items():
             gliders_used = ", ".join(sorted(pilot_gliders[safa])) if pilot_gliders[safa] else "N/A"
             row = {"Pilot Name": name, "Glider": gliders_used}
-            pilot_total = 0.0
+
+            scores_list = []
             for t_name in all_task_names:
                 s = pilot_task_scores[safa].get(t_name, 0.0)
                 row[t_name] = s
-                pilot_total += s
-            row["Total Score"] = pilot_total
+                scores_list.append(s)
+
+            # Leaderboard Overall Score: Sum of the BEST SEVEN task scores of the pilot
+            best_seven_scores = sorted(scores_list, reverse=True)[:7]
+            row["Total Score"] = sum(best_seven_scores)
             table_rows.append(row)
 
         if table_rows:
             df_overall = pd.DataFrame(table_rows)
             df_overall = df_overall.sort_values(by="Total Score", ascending=False).reset_index(drop=True)
-            # Ensure Pilot Name and Glider are excluded from the floats styling
             st.dataframe(df_overall.style.format({col: "{:.1f}" for col in df_overall.columns if col not in ["Pilot Name", "Glider"]}), use_container_width=True)
         else:
             st.info("No overall results found for this category.")
@@ -834,11 +825,13 @@ def render_leaderboard_page():
             paraglider = f.get("paraglider", "N/A")
 
             distance_score = float(f.get("distance_score", 0))
+            speed_score = float(f.get("speed_score", 0))
             total_score = float(f.get("total_score", 0))
             flight_time = f.get("flight_time_minutes")
             participants = f.get("participants", 1)
 
-            day_factor = round(min(1.0, participants / 5.0), 2)
+            # Updated Day Factor calculation
+            day_factor = round(0.5 + 0.5 * min(1.0, participants / 5.0), 2)
 
             base_dist = distance_score / day_factor if day_factor > 0 else distance_score
             max_dist_score = max_score * 0.5
@@ -864,6 +857,7 @@ def render_leaderboard_page():
                 "Day Factor": day_factor,
                 "Distance Covered (km)": round(distance_covered_km, 2),
                 "Distance Score": round(distance_score, 2),
+                "Speed Score": round(speed_score, 2),
                 "Total Duration": duration_str,
                 "Time Diff vs Fastest": time_diff_str,
                 "Total Score": round(total_score, 2)
@@ -879,7 +873,7 @@ def render_leaderboard_page():
 # -------------------------------------------------------------------
 # Navigation Routing
 # -------------------------------------------------------------------
-page = st.sidebar.radio("Navigation", ["Welcome",  "Pilot Registration", "Task Gallery", "Flight Upload", "Leaderboard", "How It Works", "Admin"])
+page = st.sidebar.radio("Navigation", ["Welcome", "Pilot Registration", "Task Gallery", "Flight Upload", "Leaderboard", "How It Works", "Admin"])
 
 if page == "Welcome":
     render_welcome_page()
