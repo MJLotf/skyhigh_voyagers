@@ -5,7 +5,7 @@ import streamlit as st
 import folium
 import requests
 from streamlit_folium import st_folium
-from datetime import time
+from datetime import time, date
 from supabase import create_client, Client
 from collections import defaultdict
 
@@ -519,6 +519,13 @@ def render_flight_upload_page():
         with col3:
             paraglider = st.text_input("Paraglider (e.g., Flow Cosmos 2)")
 
+        flight_date_input = st.date_input(
+            "Date of Flight",
+            value=None,
+            max_value=date.today(),
+            help="Select the date you actually flew. Some flight instruments record the wrong date/time zone, so we use the date you enter here instead of the one embedded in the IGC file."
+        )
+
         # Task Selection
         task_options = {f"{t['description']} (Max Score: {t['max_score']})": t for t in tasks_data}
         selected_task_label = st.selectbox("Select Task", options=list(task_options.keys()))
@@ -533,6 +540,8 @@ def render_flight_upload_page():
             st.error("Please enter your SAFA Number.")
         elif glider_class is None:
             st.error("Please select your Glider Class.")
+        elif flight_date_input is None:
+            st.error("Please select the Date of Flight.")
         elif not igc_file:
             st.error("Please upload an IGC file.")
         elif igc_file.size > 2 * 1024 * 1024:
@@ -551,7 +560,13 @@ def render_flight_upload_page():
                     st.error("Could not retrieve task parameters from XContest API. Validation cannot proceed.")
                 else:
                     igc_content = igc_file.read().decode("utf-8", errors="ignore")
-                    igc_df, parsed_name, flight_date = parse_igc(igc_content)
+                    igc_df, parsed_name, igc_flight_date = parse_igc(igc_content)
+
+                    # We no longer trust the date embedded in the IGC file — some
+                    # recording devices don't save it properly or have timezone
+                    # issues. The pilot-selected date from the form is used instead
+                    # as the flight's official date of record.
+                    flight_date = flight_date_input.isoformat()
 
                     if igc_df.empty:
                         st.error("Invalid IGC file or no valid fixes found.")
@@ -575,6 +590,7 @@ def render_flight_upload_page():
                             "task_json": task_json,
                             "igc_df": igc_df,
                             "flight_date": flight_date,
+                            "igc_flight_date": igc_flight_date,
                             "validation_results": validation_results,
                             "base_distance_score": base_distance_score,
                             "estimated_score": base_distance_score
@@ -592,6 +608,9 @@ def render_flight_upload_page():
         st.subheader("📑 Evaluation Preview")
         st.write(f"**Pilot:** {data['pilot_name']} (SAFA: {data['safa_number']})")
         st.write(f"**Flight Date:** {data['flight_date']}")
+        igc_flight_date = data.get("igc_flight_date")
+        if igc_flight_date and igc_flight_date != "Unknown" and igc_flight_date != data['flight_date']:
+            st.caption(f"ℹ️ Note: the IGC file itself reports {igc_flight_date} as its date, but the date you entered ({data['flight_date']}) is what will be recorded.")
         st.write(f"**Turnpoints Reached:** {validation_results['turnpoints_completed']} / {validation_results['total_turnpoints']}")
         st.write(f"**Estimated Distance Score:** {round(estimated_score, 2)}")
         if not validation_results['task_completed']:
