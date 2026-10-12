@@ -90,11 +90,26 @@ div[data-testid="stSidebarCollapseButton"] button::after,
 </style>
 """, unsafe_allow_html=True)
 
+# --- Config / Secrets ---
+def get_secret(name: str, default: str = "") -> str:
+    """Read from environment variables first (Railway), then fall back to
+    Streamlit secrets (local secrets.toml). Never raises if secrets.toml is missing."""
+    value = os.getenv(name)
+    if value:
+        return value
+    try:
+        return st.secrets[name]
+    except Exception:
+        return default
+
 # --- Database Connection ---
 @st.cache_resource
 def init_connection() -> Client:
-    url = os.getenv("SUPABASE_URL") or st.secrets.get("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")or st.secrets.get("SUPABASE_KEY")
+    url = get_secret("SUPABASE_URL")
+    key = get_secret("SUPABASE_KEY")
+    if not url or not key:
+        st.error("SUPABASE_URL / SUPABASE_KEY are not set. Add them as environment variables.")
+        st.stop()
     return create_client(url, key)
 
 supabase = init_connection()
@@ -712,7 +727,7 @@ def render_flight_upload_page():
 def render_admin_page():
     st.title("🖥️ Admin Control Panel")
 
-    admin_pass = os.getenv("ADMIN_PASSWORD") or st.secrets.get("ADMIN_PASSWORD", "")
+    admin_pass = get_secret("ADMIN_PASSWORD")
     password = st.text_input("Enter Admin Password", type="password")
     if password != admin_pass:
         if password: st.error("Incorrect password.")
