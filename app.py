@@ -713,7 +713,7 @@ def render_admin_page():
     st.title("🖥️ Admin Control Panel")
 
     admin_pass = os.getenv("ADMIN_PASSWORD") or st.secrets.get("ADMIN_PASSWORD", "")
-    if password != admin_pass
+    if password != admin_pass:
         if password: st.error("Incorrect password.")
         return
 
