@@ -1,3 +1,4 @@
+import os
 import json
 import math
 import pandas as pd
@@ -92,8 +93,8 @@ div[data-testid="stSidebarCollapseButton"] button::after,
 # --- Database Connection ---
 @st.cache_resource
 def init_connection() -> Client:
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
+    url = os.getenv("SUPABASE_URL") or st.secrets.get("SUPABASE_URL")
+    key = os.getenv("SUPABASE_KEY")or st.secrets.get("SUPABASE_KEY")
     return create_client(url, key)
 
 supabase = init_connection()
@@ -711,8 +712,8 @@ def render_flight_upload_page():
 def render_admin_page():
     st.title("🖥️ Admin Control Panel")
 
-    password = st.text_input("Enter Admin Password", type="password")
-    if password != st.secrets.get("ADMIN_PASSWORD", ""):
+    admin_pass = os.getenv("ADMIN_PASSWORD") or st.secrets.get("ADMIN_PASSWORD", "")
+    if password != admin_pass
         if password: st.error("Incorrect password.")
         return
 
